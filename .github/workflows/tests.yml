@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -15,7 +16,7 @@ jobs:
     steps:
       - name: Set up Homebrew
         id: set-up-homebrew
-        uses: Homebrew/actions/setup-homebrew@main
+        uses: Homebrew/actions/setup-homebrew@ceec4e8419bb3c97ce96e9dda7738499ed5f869d # 2026.11.14.1
 
       - name: Trust preinstalled external taps
         run: brew trust aws/tap azure/bicep
@@ -47,4 +48,7 @@ jobs:
           path: ${{ runner.temp }}/brew-autoupdate.app
           retention-days: 14
 
-      - run: brew style "$GITHUB_REPOSITORY"
+      # What `brew tap-new` generates for taps: `brew style` today, plus
+      # `brew readall` and `brew audit` once the tap has formulae or casks.
+      - name: Check tap syntax
+        run: brew test-bot --only-tap-syntax
