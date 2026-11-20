@@ -71,6 +71,7 @@ sources_sha256=$(/bin/cat "${source_file}" "${script_dir}/build.sh" | /usr/bin/s
 /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${build_app}"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${build_app}"
 
+/bin/mkdir -p "$(/usr/bin/dirname "${output_app}")"
 if [[ -d "${output_app}" ]]
 then
   /bin/mv "${output_app}" "${backup_app}"
