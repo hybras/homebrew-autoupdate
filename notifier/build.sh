@@ -68,15 +68,17 @@ then
 fi
 /bin/mv "${build_app}" "${output_app}"
 
-if ! /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${output_app}" ||
-   ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
+# The app was signed in the build directory. Verify it again in place, since
+# moving it across volumes could drop parts of the bundle, and keep the
+# previous app if it no longer verifies.
+if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
 then
   /bin/rm -rf "${output_app}"
   if [[ -d "${backup_app}" ]]
   then
     /bin/mv "${backup_app}" "${output_app}"
   fi
-  echo "Signing failed; restored the previous notifier app." >&2
+  echo "The installed app failed verification; restored the previous notifier app." >&2
   exit 1
 fi
 
