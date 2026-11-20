@@ -1,7 +1,12 @@
 name: Generate --help output
 # Generate `brew autoupdate --help output` for the README.md file
+# Only for main: the job force-pushes one shared update branch, so running it
+# for other branches would replace that branch with their unmerged help text.
 on:
   push:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
