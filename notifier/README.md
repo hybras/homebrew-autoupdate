@@ -2,7 +2,8 @@
 
 `notifier.swift` is the reviewable source for the notification app.
 `notify.sh` summarizes only the output from the current autoupdate run and
-passes the resulting title, subtitle, and message to the app as arguments.
+passes the resulting title, subtitle, and message to the app as
+`brew-autoupdate notify <title> <subtitle> <message>`.
 The native helper uses macOS's UserNotifications framework and runs as a
 background UI app, so it does not appear in the Dock.
 
@@ -34,13 +35,16 @@ after signing and strict verification succeed.
 
 ## Updater mode
 
-The app also runs scheduled updates (`--run-updater <log>`). The launch agent
-runs `brew_autoupdate_launcher`, which opens the app through LaunchServices so
+The app also runs scheduled updates
+(`brew-autoupdate run-updater <log> <launcher-pid>`), stopping the update if
+the launcher exits. The launch agent runs `brew_autoupdate_launcher`, which
+opens the app through LaunchServices so
 macOS attributes App Management checks to this app instead of Homebrew's
 portable Ruby. The launcher only does this when the app's `Info.plist` lists
 `run-updater` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
 it runs the updater script directly. A rebuilt app therefore has to be
-committed together with a `VERSION` bump before users get the new behaviour.
+committed together with a `VERSION` bump before users get the new behaviour;
+CI fails until the committed app's executable matches the one `notify.sh` runs.
 
 App Management grants are tied to the app's code signature. Keep signing with
 the same Developer ID and bundle identifier so existing grants carry over to

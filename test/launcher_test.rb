@@ -3,7 +3,6 @@
 require "minitest/autorun"
 require "fileutils"
 require "open3"
-require "timeout"
 require "tmpdir"
 require_relative "../lib/autoupdate/launcher"
 
@@ -44,15 +43,19 @@ class LauncherTest < Minitest::Test
     write_info_plist(capable: true)
     open = fake_open(<<~SH)
       printf '<%s>\\n' "$@"
+      echo "launcher=$PPID"
       echo 7 > #{Shellwords.escape(File.join(@location, "brew_autoupdate.status"))}
     SH
     stdout, _stderr, status = run_launcher(open)
+    *arguments, launcher_pid, launcher = stdout.lines(chomp: true)
 
     assert_equal 7, status.exitstatus
     assert_equal(
-      ["<-W>", "<-g>", "<-n>", "<#{@app}>", "<--args>", "<--run-updater>", "<#{@log}>"],
-      stdout.lines(chomp: true),
+      ["<-W>", "<-g>", "<-n>", "<#{@app}>", "<--args>", "<run-updater>", "<#{@log}>"],
+      arguments,
     )
+    # The app watches this PID to stop the updater when the launcher is stopped.
+    assert_equal "launcher=#{launcher_pid[1..-2]}", launcher
   end
 
   def test_reports_failure_when_the_app_exits_without_a_status
@@ -70,36 +73,6 @@ class LauncherTest < Minitest::Test
     assert_equal 3, status.exitstatus
     assert_equal "ran-directly\n", stdout
     assert_includes stderr, "running the updater directly"
-  end
-
-  def test_stopping_the_launcher_stops_the_running_app
-    write_info_plist(capable: true)
-    # `ps -o comm=` reports argv[0], so this stands in for the running app.
-    app_process = File.join(@dir, "brew-autoupdate-notifier")
-    pid_file = File.join(@location, "brew_autoupdate.pid")
-    open = fake_open(<<~SH)
-      /bin/bash -c 'exec -a "$0" /bin/sleep 30' #{Shellwords.escape(app_process)} &
-      echo "$!" > #{Shellwords.escape(pid_file)}
-      wait "$!"
-    SH
-
-    launcher = launcher_path(open)
-    pid = Process.spawn(launcher, out: File::NULL, err: File::NULL)
-    Timeout.timeout(10) { sleep 0.1 until File.size?(pid_file) }
-    app_pid = File.read(pid_file).to_i
-    Process.kill("TERM", pid)
-    _, launcher_status = Timeout.timeout(10) { Process.wait2(pid) }
-
-    assert_equal 143, launcher_status.exitstatus
-    Timeout.timeout(10) do
-      sleep 0.1 while process_alive?(app_pid)
-    end
-  ensure
-    begin
-      Process.kill("KILL", app_pid) if app_pid && process_alive?(app_pid)
-    rescue Errno::ESRCH
-      nil
-    end
   end
 
   private
@@ -124,21 +97,9 @@ class LauncherTest < Minitest::Test
     path
   end
 
-  def launcher_path(open)
-    path = Autoupdate::Launcher.path(@location)
-    contents = Autoupdate::Launcher.script(app: @app, location: @location, log: @log, open:)
-    write_executable(path, contents)
-    path
-  end
-
   def run_launcher(open)
-    Open3.capture3(launcher_path(open))
-  end
-
-  # A terminated child stays a zombie until its parent reaps it, so check the
-  # process state rather than whether the PID still exists.
-  def process_alive?(pid)
-    state, = Open3.capture2("/bin/ps", "-o", "stat=", "-p", pid.to_s)
-    !state.strip.empty? && !state.start_with?("Z")
+    path = Autoupdate::Launcher.path(@location)
+    write_executable(path, Autoupdate::Launcher.script(app: @app, location: @location, log: @log, open:))
+    Open3.capture3(path)
   end
 end

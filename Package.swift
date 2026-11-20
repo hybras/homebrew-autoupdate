@@ -9,7 +9,7 @@ let package = Package(
   ],
   products: [
     .executable(
-      name: "brew-autoupdate-notifier",
+      name: "brew-autoupdate",
       targets: ["BrewAutoupdateNotifier"]
     ),
   ],

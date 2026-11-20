@@ -78,6 +78,16 @@ class NotifierTest < Minitest::Test
     assert_predicate status, :success?, stderr
   end
 
+  def test_committed_app_has_the_executable_notify_sh_runs
+    plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
+    output, status = Open3.capture2("/usr/bin/plutil", "-extract", "CFBundleExecutable", "raw", plist)
+
+    expected = File.read(SCRIPT)[%r{Contents/MacOS/([^"]+)"}, 1]
+
+    assert_predicate status, :success?
+    assert_equal expected, output.strip, "Rebuild the committed app with notifier/build.sh"
+  end
+
   def test_committed_app_runs_as_a_background_ui_helper
     plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
     output, status = Open3.capture2(
@@ -98,7 +108,8 @@ class NotifierTest < Minitest::Test
 
     assert_includes source, "UNUserNotificationCenter.current()"
     assert_includes source, "CommandLine.arguments"
-    assert_includes shell, "Contents/MacOS/brew-autoupdate-notifier"
+    assert_includes shell, 'Contents/MacOS/brew-autoupdate"'
+    assert_includes shell, '"${notifier_executable}" notify '
     refute_includes shell, "/usr/bin/open"
   end
 
@@ -108,6 +119,7 @@ class NotifierTest < Minitest::Test
     assert_predicate status, :success?
     assert_equal(
       [
+        "<notify>",
         "<Homebrew autoupdate completed>",
         "<brew-autoupdate>",
         "<Homebrew is already up-to-date.>",
@@ -128,14 +140,14 @@ class NotifierTest < Minitest::Test
     source = File.read(File.join(ROOT, "notifier/notifier.swift"))
 
     assert_includes build, %q(-insert BrewAutoupdateCapabilities -json '["run-updater"]')
-    assert_includes source, 'let runUpdaterFlag = "--run-updater"'
+    assert_includes source, 'case ("run-updater", 3):'
   end
 
   def test_updater_mode_runs_only_the_fixed_updater_script
     source = File.read(File.join(ROOT, "notifier/notifier.swift"))
 
-    assert_includes source, 'let updaterScriptName = "brew_autoupdate"'
-    assert_includes source, "requireOwnedPath(updaterScript, isDirectory: false)"
+    assert_includes source, 'let updater = "\\(supportDirectory)/brew_autoupdate"'
+    assert_includes source, "requireOwnedByUser(updater, type: .typeRegular)"
   end
 
   private
@@ -157,7 +169,7 @@ class NotifierTest < Minitest::Test
 
   def invoke_fake_notifier(exit_status, contents, helper_status: 0)
     Dir.mktmpdir("autoupdate-notifier-app") do |app|
-      executable = File.join(app, "Contents/MacOS/brew-autoupdate-notifier")
+      executable = File.join(app, "Contents/MacOS/brew-autoupdate")
       FileUtils.mkdir_p(File.dirname(executable))
       File.write(
         executable,

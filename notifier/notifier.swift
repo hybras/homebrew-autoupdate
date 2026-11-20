@@ -1,185 +1,15 @@
 import AppKit
-import Darwin
 import Foundation
 import UserNotifications
 
-// This app has two modes:
+// brew-autoupdate notify <title> <subtitle> <message>
+//   Posts a notification.
 //
-//   brew-autoupdate-notifier <title> <subtitle> <message>
-//     Posts a single notification and exits.
-//
-//   brew-autoupdate-notifier --run-updater <log>
-//     Runs the generated updater script and appends its output to <log>. The
-//     launch agent opens the app in this mode through LaunchServices, which
-//     makes this signed app, rather than Homebrew's portable Ruby, the process
-//     macOS holds responsible for App Management checks. The grant therefore
-//     survives portable Ruby upgrades.
-
-let runUpdaterFlag = "--run-updater"
-let supportDirectoryName = "com.github.domt4.homebrew-autoupdate"
-let updaterScriptName = "brew_autoupdate"
-let pidFileName = "brew_autoupdate.pid"
-let statusFileName = "brew_autoupdate.status"
-
-func fail(_ message: String) -> Never {
-  FileHandle.standardError.write(Data("brew-autoupdate notifier: \(message)\n".utf8))
-  exit(1)
-}
-
-// MARK: - Updater mode
-
-func homeDirectory() -> String {
-  guard let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir else {
-    fail("could not determine the home directory")
-  }
-  return String(cString: directory)
-}
-
-func errnoDescription() -> String {
-  String(cString: strerror(errno))
-}
-
-/// Refuses paths that another user could have replaced. The updater script is
-/// run with this app's App Management permission, so only the current user's
-/// own, non-shared files are accepted.
-func requireOwnedPath(_ path: String, isDirectory: Bool) {
-  var info = stat()
-  guard lstat(path, &info) == 0 else {
-    fail("cannot inspect \(path): \(errnoDescription())")
-  }
-  let expectedType = isDirectory ? S_IFDIR : S_IFREG
-  guard info.st_mode & S_IFMT == expectedType else {
-    fail("\(path) is not a \(isDirectory ? "directory" : "regular file")")
-  }
-  guard info.st_uid == getuid() else {
-    fail("\(path) is not owned by the current user")
-  }
-  guard info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
-    fail("\(path) is writable by other users")
-  }
-}
-
-func writeFile(_ path: String, _ contents: String) {
-  do {
-    try contents.write(toFile: path, atomically: true, encoding: .utf8)
-  } catch {
-    FileHandle.standardError.write(
-      Data("brew-autoupdate notifier: could not write \(path): \(error.localizedDescription)\n".utf8)
-    )
-  }
-}
-
-func exitCode(fromWaitStatus status: Int32) -> Int32 {
-  let signal = status & 0x7f
-  if signal == 0 {
-    return (status >> 8) & 0xff
-  }
-  return 128 + signal
-}
-
-func runUpdater(arguments: [String]) -> Never {
-  guard arguments.count == 1, !arguments[0].isEmpty else {
-    fail("expected \(runUpdaterFlag) <log>")
-  }
-  let logPath = arguments[0]
-
-  // The script path is fixed rather than taken from the arguments, so the
-  // app cannot be used to run arbitrary programs with its permissions.
-  let supportDirectory = "\(homeDirectory())/Library/Application Support/\(supportDirectoryName)"
-  let updaterScript = "\(supportDirectory)/\(updaterScriptName)"
-  let pidFile = "\(supportDirectory)/\(pidFileName)"
-  let statusFile = "\(supportDirectory)/\(statusFileName)"
-  requireOwnedPath(supportDirectory, isDirectory: true)
-  requireOwnedPath(updaterScript, isDirectory: false)
-
-  let logDescriptor = open(logPath, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
-  guard logDescriptor >= 0 else {
-    fail("cannot open \(logPath): \(errnoDescription())")
-  }
-
-  let application = NSApplication.shared
-  application.setActivationPolicy(.accessory)
-
-  let activity = ProcessInfo.processInfo.beginActivity(
-    options: [.background, .suddenTerminationDisabled, .automaticTerminationDisabled],
-    reason: "Running Homebrew autoupdate"
-  )
-
-  // Forward termination requests (e.g. `brew autoupdate stop`) to the whole
-  // updater process group, then exit once it has finished.
-  let forwardedSignals = [SIGTERM, SIGINT, SIGHUP]
-  var defaultSignals = sigset_t()
-  sigemptyset(&defaultSignals)
-  for forwardedSignal in forwardedSignals {
-    signal(forwardedSignal, SIG_IGN)
-    sigaddset(&defaultSignals, forwardedSignal)
-  }
-  var emptyMask = sigset_t()
-  sigemptyset(&emptyMask)
-
-  var fileActions: posix_spawn_file_actions_t?
-  posix_spawn_file_actions_init(&fileActions)
-  posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
-  posix_spawn_file_actions_adddup2(&fileActions, logDescriptor, STDOUT_FILENO)
-  posix_spawn_file_actions_adddup2(&fileActions, logDescriptor, STDERR_FILENO)
-
-  var attributes: posix_spawnattr_t?
-  posix_spawnattr_init(&attributes)
-  posix_spawnattr_setflags(
-    &attributes,
-    Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)
-  )
-  posix_spawnattr_setpgroup(&attributes, 0)
-  posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
-  posix_spawnattr_setsigmask(&attributes, &emptyMask)
-
-  // LaunchServices does not apply the launch agent's background priority to
-  // apps it opens, so apply the same throttling to the updater explicitly.
-  let childArguments = ["/usr/sbin/taskpolicy", "-b", "/bin/sh", updaterScript]
-  var argv: [UnsafeMutablePointer<CChar>?] = childArguments.map { strdup($0) }
-  argv.append(nil)
-
-  var childPID: pid_t = 0
-  let spawnResult = posix_spawn(&childPID, childArguments[0], &fileActions, &attributes, argv, environ)
-  argv.forEach { free($0) }
-  posix_spawn_file_actions_destroy(&fileActions)
-  posix_spawnattr_destroy(&attributes)
-  close(logDescriptor)
-  guard spawnResult == 0 else {
-    fail("could not start the updater: \(String(cString: strerror(spawnResult)))")
-  }
-
-  writeFile(pidFile, "\(getpid())\n")
-
-  var signalSources: [DispatchSourceSignal] = []
-  for forwardedSignal in forwardedSignals {
-    let source = DispatchSource.makeSignalSource(signal: forwardedSignal, queue: .main)
-    source.setEventHandler {
-      kill(-childPID, SIGTERM)
-    }
-    source.resume()
-    signalSources.append(source)
-  }
-
-  DispatchQueue.global(qos: .utility).async {
-    var waitStatus: Int32 = 0
-    while waitpid(childPID, &waitStatus, 0) == -1 && errno == EINTR {}
-    let code = exitCode(fromWaitStatus: waitStatus)
-
-    DispatchQueue.main.async {
-      signalSources.forEach { $0.cancel() }
-      writeFile(statusFile, "\(code)\n")
-      unlink(pidFile)
-      ProcessInfo.processInfo.endActivity(activity)
-      exit(code)
-    }
-  }
-
-  RunLoop.main.run()
-  fail("the run loop exited unexpectedly")
-}
-
-// MARK: - Notification mode
+// brew-autoupdate run-updater <log> <launcher-pid>
+//   Runs the generated updater script, appending its output to <log>. The
+//   launch agent opens the app through LaunchServices for this, so macOS holds
+//   this signed app, rather than Homebrew's portable Ruby, responsible for App
+//   Management checks, and a single grant survives portable Ruby upgrades.
 
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
   func userNotificationCenter(
@@ -191,12 +21,19 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
   }
 }
 
-func postNotification(title: String, subtitle: String, message: String) -> Never {
+let notificationDelegate = NotificationDelegate()
+var dispatchSources: [DispatchSourceProtocol] = []
+
+func fail(_ message: String) -> Never {
+  FileHandle.standardError.write(Data("brew-autoupdate: \(message)\n".utf8))
+  exit(1)
+}
+
+func notify(title: String, subtitle: String, message: String) {
   let application = NSApplication.shared
   application.setActivationPolicy(.accessory)
 
   let notificationCenter = UNUserNotificationCenter.current()
-  let notificationDelegate = NotificationDelegate()
   notificationCenter.delegate = notificationDelegate
 
   notificationCenter.requestAuthorization(options: [.alert]) { granted, error in
@@ -227,21 +64,90 @@ func postNotification(title: String, subtitle: String, message: String) -> Never
       }
     }
   }
-
-  RunLoop.main.run()
-  fail("the run loop exited unexpectedly")
 }
 
-// MARK: - Entry point
+// The updater runs with this app's App Management permission, so refuse
+// anything another user could have replaced.
+func requireOwnedByUser(_ path: String, type: FileAttributeType) {
+  guard
+    let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+    attributes[.type] as? FileAttributeType == type,
+    (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+    let permissions = attributes[.posixPermissions] as? Int,
+    permissions & 0o022 == 0
+  else {
+    fail("\(path) must be owned by you and not writable by others")
+  }
+}
+
+func runUpdater(log: String, launcherPID: pid_t) {
+  // The script path is fixed so the app cannot be used to run arbitrary
+  // programs with its permissions.
+  guard let home = getpwuid(getuid())?.pointee.pw_dir else {
+    fail("could not determine the home directory")
+  }
+  let supportDirectory = "\(String(cString: home))/Library/Application Support/com.github.domt4.homebrew-autoupdate"
+  let updater = "\(supportDirectory)/brew_autoupdate"
+  requireOwnedByUser(supportDirectory, type: .typeDirectory)
+  requireOwnedByUser(updater, type: .typeRegular)
+
+  // Append, like launchd does, so concurrent writers never overwrite each other.
+  let descriptor = open(log, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+  guard descriptor >= 0 else {
+    fail("could not open \(log): \(String(cString: strerror(errno)))")
+  }
+  let logHandle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+
+  // LaunchServices does not apply the launch agent's background priority to
+  // apps it opens, so apply it to the updater explicitly.
+  let updaterProcess = Process()
+  updaterProcess.executableURL = URL(fileURLWithPath: "/usr/sbin/taskpolicy")
+  updaterProcess.arguments = ["-b", "/bin/sh", updater]
+  updaterProcess.standardInput = FileHandle.nullDevice
+  updaterProcess.standardOutput = logHandle
+  updaterProcess.standardError = logHandle
+  updaterProcess.terminationHandler = { process in
+    let status = process.terminationStatus + (process.terminationReason == .uncaughtSignal ? 128 : 0)
+    try? "\(status)\n".write(toFile: "\(supportDirectory)/brew_autoupdate.status", atomically: true, encoding: .utf8)
+    exit(status)
+  }
+
+  do {
+    try updaterProcess.run()
+  } catch {
+    fail("could not start the updater: \(error.localizedDescription)")
+  }
+
+  // Process starts the updater in its own process group. Stop the whole group
+  // when this app is asked to quit or the launcher exits, e.g. on
+  // `brew autoupdate stop`.
+  let stopUpdater = { _ = kill(-updaterProcess.processIdentifier, SIGTERM) }
+  signal(SIGTERM, SIG_IGN)
+  let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+  terminationSource.setEventHandler(handler: stopUpdater)
+  let launcherSource = DispatchSource.makeProcessSource(identifier: launcherPID, eventMask: .exit, queue: .main)
+  launcherSource.setEventHandler(handler: stopUpdater)
+  dispatchSources = [terminationSource, launcherSource]
+  dispatchSources.forEach { $0.resume() }
+
+  if kill(launcherPID, 0) != 0 {
+    stopUpdater()
+  }
+}
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
-if arguments.first == runUpdaterFlag {
-  runUpdater(arguments: Array(arguments.dropFirst()))
+switch (arguments.first, arguments.count) {
+case ("notify", 4):
+  notify(title: arguments[1], subtitle: arguments[2], message: arguments[3])
+case ("run-updater", 3):
+  guard let launcherPID = pid_t(arguments[2]), launcherPID > 0 else {
+    fail("invalid launcher PID: \(arguments[2])")
+  }
+  runUpdater(log: arguments[1], launcherPID: launcherPID)
+default:
+  fail("usage: brew-autoupdate notify <title> <subtitle> <message>\n" +
+       "       brew-autoupdate run-updater <log> <launcher-pid>")
 }
 
-guard arguments.count == 3 else {
-  fail("expected a title, subtitle, and message, or \(runUpdaterFlag) <log>")
-}
-
-postNotification(title: arguments[0], subtitle: arguments[1], message: arguments[2])
+RunLoop.main.run()

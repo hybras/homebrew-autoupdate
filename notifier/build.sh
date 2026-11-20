@@ -8,10 +8,10 @@ output_app="${script_dir}/brew-autoupdate.app"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
 version=$(<"${version_file}")
-build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate-notifier.XXXXXX")
+build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate.XXXXXX")
 build_app="${build_dir}/brew-autoupdate.app"
 backup_app="${build_dir}/previous.app"
-executable_name="brew-autoupdate-notifier"
+executable_name="brew-autoupdate"
 
 trap '/bin/rm -rf "$build_dir"' EXIT
 
