@@ -133,7 +133,7 @@ module Autoupdate
     if config.sudo
       write_executable(sudo_askpass, Autoupdate::Script.sudo_askpass(
                                        prefix: HOMEBREW_PREFIX,
-                                       icon:   location/"notifier/applet.icns",
+                                       icon:   Autoupdate::Core.tap_dir/"notifier/applet.icns",
                                      ))
     end
 
