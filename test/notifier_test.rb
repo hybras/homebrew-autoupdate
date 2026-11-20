@@ -139,7 +139,7 @@ class NotifierTest < Minitest::Test
     build = File.read(File.join(ROOT, "notifier/build.sh"))
     source = File.read(File.join(ROOT, "notifier/notifier.swift"))
 
-    assert_includes build, %q(-insert BrewAutoupdateCapabilities -json '["run-updater"]')
+    assert_includes build, %q(-insert BrewAutoupdateCapabilities -json '["run-updater-1"]')
     assert_includes source, 'case ("run-updater", 3):'
   end
 

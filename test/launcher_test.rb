@@ -83,7 +83,7 @@ class LauncherTest < Minitest::Test
   end
 
   def write_info_plist(capable:)
-    capabilities = capable ? "<key>BrewAutoupdateCapabilities</key><array><string>run-updater</string></array>" : ""
+    capabilities = capable ? "<key>BrewAutoupdateCapabilities</key><array><string>run-updater-1</string></array>" : ""
     File.write(File.join(@app, "Contents", "Info.plist"), <<~XML)
       <?xml version="1.0" encoding="UTF-8"?>
       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

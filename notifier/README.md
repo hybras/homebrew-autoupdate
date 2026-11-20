@@ -41,10 +41,15 @@ the launcher exits. The launch agent runs `brew_autoupdate_launcher`, which
 opens the app through LaunchServices so
 macOS attributes App Management checks to this app instead of Homebrew's
 portable Ruby. The launcher only does this when the app's `Info.plist` lists
-`run-updater` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
+`run-updater-1` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
 it runs the updater script directly. A rebuilt app therefore has to be
 committed together with a `VERSION` bump before users get the new behaviour;
 CI fails until the committed app's executable matches the one `notify.sh` runs.
+
+The `-1` names the current `run-updater` arguments. If they change, list a new
+name (`run-updater-2`) alongside the old one and keep accepting the old
+arguments: existing launchers keep using them until the user runs
+`brew autoupdate start` again.
 
 App Management grants are tied to the app's code signature. Keep signing with
 the same Developer ID and bundle identifier so existing grants carry over to

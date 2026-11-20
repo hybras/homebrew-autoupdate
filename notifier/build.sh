@@ -55,8 +55,9 @@ fi
 /usr/bin/plutil -insert LSMinimumSystemVersion -string "11.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSUIElement -bool true "${build_app}/Contents/Info.plist"
 # The generated launcher checks this before opening the app in updater mode,
-# so an older notification-only app is never asked to run the updater.
-/usr/bin/plutil -insert BrewAutoupdateCapabilities -json '["run-updater"]' "${build_app}/Contents/Info.plist"
+# so an app is never asked to run the updater with arguments it does not
+# accept. See Autoupdate::Launcher::CAPABILITY.
+/usr/bin/plutil -insert BrewAutoupdateCapabilities -json '["run-updater-1"]' "${build_app}/Contents/Info.plist"
 
 /bin/cp "${script_dir}/applet.icns" "${build_app}/Contents/Resources/applet.icns"
 /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${build_app}"
