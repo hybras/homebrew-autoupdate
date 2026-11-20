@@ -8,7 +8,7 @@ module Autoupdate
   module Script
     module_function
 
-    def updater(config, brew:, casks:, leaves_script:, sudo_askpass:, notify_command:)
+    def updater(config, brew:, casks:, sudo_askpass:, notify_command:)
       <<~SH
         #!/bin/sh
         #{ac_only_check if config.ac_only}
@@ -17,7 +17,7 @@ module Autoupdate
         trap '/bin/rm -f "$run_log"' EXIT
 
         /bin/date
-        (#{commands(config, brew:, casks:, leaves_script:).join(" && ")}) >"$run_log" 2>&1
+        (#{commands(config, brew:, casks:).join(" && ")}) >"$run_log" 2>&1
         status=$?
         /bin/cat "$run_log"
         #{notify_command}
@@ -25,13 +25,16 @@ module Autoupdate
       SH
     end
 
-    def commands(config, brew:, casks:, leaves_script:)
+    def commands(config, brew:, casks:)
       greedy = config.greedy ? " --greedy" : ""
       commands = ["#{brew} update"]
 
       if config.upgrade
         commands << if config.leaves_only
-          Shellwords.escape(leaves_script)
+          # Formula names contain no whitespace, so `$leaves` is split on purpose.
+          "leaves=$(#{brew} leaves) && if [ -n \"$leaves\" ]; then " \
+            "#{brew} upgrade --no-ask --formula -v $leaves; " \
+            "else echo \"No leaves packages to upgrade.\"; fi"
         elsif config.only
           "#{brew} upgrade --no-ask -v#{greedy} #{config.only.join(" ")}"
         else
@@ -58,24 +61,6 @@ module Autoupdate
         elif ! echo "$output" | /usr/bin/grep --quiet "'AC Power'"; then
           echo "Skipping homebrew-autoupdate: device not on AC power" >&2
           exit
-        fi
-      SH
-    end
-
-    def leaves(brew:)
-      <<~SH
-        #!/bin/bash
-        set -e
-        LEAVES=$(#{brew} leaves)
-        if [ -n "$LEAVES" ]; then
-          echo "Upgrading leaves packages only..."
-          #{brew} upgrade --no-ask --formula -v $(echo "$LEAVES") || {
-            echo "Warning: Some leaves packages failed to upgrade."
-            # Return 0 to ensure the autoupdate process continues
-            exit 0
-          }
-        else
-          echo "No leaves packages to upgrade."
         fi
       SH
     end

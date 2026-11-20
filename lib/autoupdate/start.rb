@@ -138,12 +138,9 @@ module Autoupdate
 
   def write_scripts(config, location:, log:, legacy:)
     updater = Autoupdate::Core.updater
-    leaves_script = location/"brew_autoupdate_leaves"
     sudo_askpass = location/"brew_autoupdate_sudo_gui"
-
-    if config.upgrade && config.leaves_only
-      write_executable(leaves_script, Autoupdate::Script.leaves(brew: Autoupdate::Core.brew))
-    end
+    # Written by earlier versions for `--leaves-only`.
+    FileUtils.rm_f location/"brew_autoupdate_leaves" unless legacy
 
     if config.sudo
       write_executable(sudo_askpass, Autoupdate::Script.sudo_askpass(
@@ -168,7 +165,6 @@ module Autoupdate
                                   config,
                                   brew:           Autoupdate::Core.brew,
                                   casks:          casks_installed?,
-                                  leaves_script:  leaves_script.to_s,
                                   sudo_askpass:   sudo_askpass.to_s,
                                   notify_command: Autoupdate::Notify.command(mode: config.notify),
                                 ))

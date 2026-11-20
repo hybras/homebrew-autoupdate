@@ -16,7 +16,8 @@ class ScriptTest < Minitest::Test
     # Records each invocation; `upgrade` fails when FAIL_UPGRADE is set.
     write_executable(@brew, <<~SH)
       #!/bin/sh
-      echo "brew $*"
+      echo "brew $*" >&2
+      [ "$1" = leaves ] && printf 'wget\\ngit\\n'
       [ "$1" = upgrade ] && [ -n "${FAIL_UPGRADE:-}" ] && exit 2
       exit 0
     SH
@@ -54,6 +55,21 @@ class ScriptTest < Minitest::Test
     output, = run_updater(config(upgrade: true, greedy: true, only: %w[wget firefox]))
 
     assert_equal ["brew update", "brew upgrade --no-ask -v --greedy wget firefox"], brew_calls(output)
+  end
+
+  def test_leaves_only_upgrades_top_level_formulae
+    output, status = run_updater(config(upgrade: true, leaves_only: true), casks: false)
+
+    assert_predicate status, :success?
+    assert_equal ["brew update", "brew leaves", "brew upgrade --no-ask --formula -v wget git"], brew_calls(output)
+  end
+
+  def test_leaves_only_reports_failed_upgrades
+    output, status = run_updater(config(upgrade: true, leaves_only: true), casks: false,
+                                                                           env:   { "FAIL_UPGRADE" => "1" })
+
+    assert_equal 2, status.exitstatus
+    assert_includes output, "notify 2"
   end
 
   def test_a_failed_step_stops_the_run_and_is_reported
@@ -129,7 +145,6 @@ class ScriptTest < Minitest::Test
     {
       brew:           @brew,
       casks:,
-      leaves_script:  File.join(@dir, "leaves"),
       sudo_askpass:   File.join(@dir, "sudo askpass"),
       notify_command: 'echo "notify $status"',
     }
