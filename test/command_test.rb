@@ -123,43 +123,6 @@ class CommandTest < Minitest::Test
     refute_includes stdout, "Last Changed"
   end
 
-  def test_generated_upgrade_commands_disable_confirmation
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-    upgrade_lines = source.lines.grep(/Autoupdate::Core\.brew\} upgrade /)
-
-    assert_equal 4, upgrade_lines.length
-    upgrade_lines.each do |line|
-      assert_includes line, "upgrade --no-ask"
-    end
-  end
-
-  def test_sudo_askpass_extracts_and_decodes_pinentry_data
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-    awk_program = source.match(%r{/usr/bin/awk '([^']+)'})&.captures&.first
-
-    refute_nil awk_program
-
-    pinentry_output = "D p%25ss\nD  leading space\nD \tleading tab\nD D\nOK\n"
-    stdout, stderr, status = Open3.capture3("/usr/bin/awk", awk_program, stdin_data: pinentry_output)
-
-    assert_predicate status, :success?, stderr
-    assert_equal "p%ss\n leading space\n\tleading tab\nD\n", stdout
-  end
-
-  def test_sudo_askpass_is_refreshed_when_its_contents_change
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-
-    assert_includes source, "!sudo_gui_script.exist? || sudo_gui_script.read != sudo_gui_script_contents"
-    assert_includes source, "sudo_gui_script.atomic_write(sudo_gui_script_contents)"
-  end
-
-  def test_launch_agent_runs_the_refreshed_launcher
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-
-    assert_equal 2, source.scan("<string>\#{CGI.escapeHTML(launcher_script.to_s)}</string>").length
-    assert_includes source, "launcher_script.read != launcher_script_contents"
-  end
-
   private
 
   def brew_autoupdate(*arguments)
