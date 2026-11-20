@@ -70,7 +70,7 @@ supported, including tap-qualified names (`homebrew/cask/firefox`) and
 versioned formulae (`node@20`).
 
 Cannot be combined with `--leaves-only`. To change which packages are
-auto-upgraded, run `brew autoupdate delete` then start again with the new list.
+auto-upgraded, run `brew autoupdate stop` then start again with the new list.
 
 ### Run at a specific time every day
 
@@ -151,7 +151,9 @@ From tap: domt4/autoupdate
 Usage: brew autoupdate start [interval] [options]:
     Start autoupdating in the background. The interval defaults to 24 hours and
 accepts seconds or a suffix such as 30m, 12h, or 1d, or a 24-hour clock
-time such as 00:00 to run daily at that specific time.
+time such as 00:00 to run daily at that specific time. After stop, running
+start with no interval or options resumes with the saved options; otherwise
+the given ones replace them.
 
   -d, --debug                      Display any debugging information.
   -q, --quiet                      Make some output more quiet.

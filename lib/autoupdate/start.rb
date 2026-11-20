@@ -18,6 +18,10 @@ module Autoupdate
     HOMEBREW_CASK_OPTS
   ].freeze
 
+  # `start` options other than the interval. Without any of them, `start`
+  # after `stop` reuses the saved options.
+  START_SWITCHES = %w[upgrade greedy cleanup immediate sudo leaves_only ac_only notify_on_error no_notify].freeze
+
   def start(interval:, args:)
     if Autoupdate::Launchd.loaded?
       odie <<~EOS
@@ -26,7 +30,17 @@ module Autoupdate
       EOS
     end
 
-    config = config_from_args(interval:, args:)
+    options_given = args.named.any? || args.only || START_SWITCHES.any? { |switch| args.send(:"#{switch}?") }
+    # Setups created before options were saved keep their updater script
+    # unless new options are given, since its options cannot be recovered.
+    legacy = !Autoupdate::Core.config_file.exist? && Autoupdate::Core.updater.exist? && !options_given
+
+    config = if options_given || !Autoupdate::Core.config_file.exist?
+      config_from_args(interval:, args:)
+    else
+      ohai "Reusing the options saved by the previous `brew autoupdate start`."
+      Autoupdate::Config.load(Autoupdate::Core.config_file)
+    end
     check_config(config)
 
     location = Autoupdate::Core.location
@@ -34,7 +48,8 @@ module Autoupdate
     FileUtils.mkpath(location)
     log = log_path
 
-    write_scripts(config, location:, log:)
+    config.save(Autoupdate::Core.config_file) unless legacy
+    write_scripts(config, location:, log:, legacy:)
     write_launch_agent(config, location:, log:)
     Autoupdate::Launchd.load(Autoupdate::Core.plist)
 
@@ -121,8 +136,8 @@ module Autoupdate
     end
   end
 
-  def write_scripts(config, location:, log:)
-    updater = location/"brew_autoupdate"
+  def write_scripts(config, location:, log:, legacy:)
+    updater = Autoupdate::Core.updater
     leaves_script = location/"brew_autoupdate_leaves"
     sudo_askpass = location/"brew_autoupdate_sudo_gui"
 
@@ -137,17 +152,18 @@ module Autoupdate
                                      ))
     end
 
-    # Security tools like "Little Snitch" only display the executable name by
-    # default, which makes this generic name a little worrying without context.
-    # Rename the old script to the new script name, which should provide more
-    # clarity to users who run systems with tools like LS installed.
-    FileUtils.cp location/"updater", updater if (location/"updater").exist?
-
-    # If someone has previously stopped the command assume when they start
-    # it again they'd want to keep the same options & don't replace the script.
-    # If you want to tweak prior-provided options the expected way is with the
-    # delete command followed by the start command with new args.
-    unless updater.exist?
+    if legacy
+      # Security tools like "Little Snitch" only display the executable name by
+      # default, which makes this generic name a little worrying without context.
+      # Rename the old script to the new script name, which should provide more
+      # clarity to users who run systems with tools like LS installed.
+      FileUtils.cp location/"updater", updater if (location/"updater").exist?
+      opoo <<~EOS
+        This setup was created by an older version of `brew autoupdate`, which did
+        not save its options, so its updater script is kept as it is. To update it,
+        run `brew autoupdate delete` and then `brew autoupdate start` with your options.
+      EOS
+    else
       write_executable(updater, Autoupdate::Script.updater(
                                   config,
                                   brew:           Autoupdate::Core.brew,

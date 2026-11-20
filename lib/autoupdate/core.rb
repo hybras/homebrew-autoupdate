@@ -28,6 +28,14 @@ module Autoupdate
       Pathname.new(File.expand_path("~/Library/Application Support/#{name}"))
     end
 
+    def config_file
+      location/"config.json"
+    end
+
+    def updater
+      location/"brew_autoupdate"
+    end
+
     # The checkout this code was loaded from, wherever it is tapped.
     def tap_dir
       Pathname.new(File.expand_path("../..", __dir__))

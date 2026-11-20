@@ -58,6 +58,8 @@ module Homebrew
             The interval defaults to 24 hours and accepts seconds or a suffix such as
             `30m`, `12h`, or `1d`, or a 24-hour clock time such as `00:00` to run daily
             at that specific time.
+            After `stop`, running `start` with no interval or options resumes with the
+            saved options; otherwise the given ones replace them.
           EOS
 
           switch "--upgrade",
