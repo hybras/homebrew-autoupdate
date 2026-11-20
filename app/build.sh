@@ -1,10 +1,14 @@
 #!/bin/bash
 
+# Usage: CODESIGN_IDENTITY=<identity> app/build.sh [output.app]
+# Builds, signs and verifies the app, then installs it at output.app, which
+# defaults to the committed app. CI passes `-` (ad-hoc) and a temporary path.
+
 set -eu
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
 source_file="${script_dir}/BrewAutoupdate.swift"
-output_app="${script_dir}/brew-autoupdate.app"
+output_app="${1:-${script_dir}/brew-autoupdate.app}"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
 version=$(<"${version_file}")

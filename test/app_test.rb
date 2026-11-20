@@ -2,10 +2,12 @@
 
 require "minitest/autorun"
 require "digest"
+require "json"
 require "fileutils"
 require "open3"
 require "tempfile"
 require "tmpdir"
+require_relative "../lib/autoupdate/launcher"
 
 class AppTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__).freeze
@@ -138,9 +140,24 @@ class AppTest < Minitest::Test
     assert_includes output, "Warning: could not display the update result."
   end
 
+  def test_built_app_is_universal_and_can_run_the_updater
+    app = ENV.fetch("BREW_AUTOUPDATE_APP") { skip "set BREW_AUTOUPDATE_APP to an app built by app/build.sh" }
+    executable = File.join(app, "Contents/MacOS/brew-autoupdate")
+    architectures, = Open3.capture2("/usr/bin/lipo", "-archs", executable)
+    capabilities, = Open3.capture2("/usr/bin/plutil", "-extract", "BrewAutoupdateCapabilities", "json",
+                                   "-o", "-", File.join(app, "Contents/Info.plist"))
+
+    assert_equal %w[arm64 x86_64], architectures.split.sort
+    assert_includes JSON.parse(capabilities), Autoupdate::Launcher::CAPABILITY
+  end
+
   def test_built_executable_rejects_invalid_arguments
-    executable = File.join(ROOT, ".build/debug/brew-autoupdate")
-    skip "run `swift build` first" unless File.executable?(executable)
+    executable = if (app = ENV.fetch("BREW_AUTOUPDATE_APP", nil))
+      File.join(app, "Contents/MacOS/brew-autoupdate")
+    else
+      File.join(ROOT, ".build/debug/brew-autoupdate")
+    end
+    skip "run `swift build` or set BREW_AUTOUPDATE_APP" unless File.executable?(executable)
 
     [[], ["notify", "title"], ["run-updater", "/tmp/log"]].each do |arguments|
       _stdout, stderr, status = Open3.capture3(executable, *arguments)
