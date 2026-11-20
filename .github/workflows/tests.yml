@@ -20,6 +20,10 @@ jobs:
       - name: Trust preinstalled external taps
         run: brew trust aws/tap azure/bicep
 
+      # Before the tests, which also exercise the built executable.
+      - name: Build the notifier
+        run: swift build
+
       - name: Run tests
         run: |
           for test in test/*_test.rb; do
@@ -29,7 +33,6 @@ jobs:
       - name: Validate notifier sources
         run: |
           bash -n notifier/notify.sh notifier/build.sh
-          swift build
           test "$(cat VERSION)" = \
             "$(plutil -extract CFBundleShortVersionString raw notifier/brew-autoupdate.app/Contents/Info.plist)"
 

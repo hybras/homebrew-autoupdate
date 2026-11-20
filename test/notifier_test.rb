@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "digest"
 require "fileutils"
 require "open3"
 require "tempfile"
@@ -78,14 +79,13 @@ class NotifierTest < Minitest::Test
     assert_predicate status, :success?, stderr
   end
 
-  def test_committed_app_has_the_executable_notify_sh_runs
+  def test_committed_app_was_built_from_the_current_sources
     plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
-    output, status = Open3.capture2("/usr/bin/plutil", "-extract", "CFBundleExecutable", "raw", plist)
+    output, = Open3.capture2("/usr/bin/plutil", "-extract", "BrewAutoupdateSourcesSHA256", "raw", plist)
+    sources = %w[notifier/notifier.swift notifier/build.sh].map { |path| File.binread(File.join(ROOT, path)) }
 
-    expected = File.read(SCRIPT)[%r{Contents/MacOS/([^"]+)"}, 1]
-
-    assert_predicate status, :success?
-    assert_equal expected, output.strip, "Rebuild the committed app with notifier/build.sh"
+    assert_equal Digest::SHA256.hexdigest(sources.join), output.strip,
+                 "Rebuild the committed app with notifier/build.sh"
   end
 
   def test_committed_app_runs_as_a_background_ui_helper
@@ -100,17 +100,6 @@ class NotifierTest < Minitest::Test
 
     assert_predicate status, :success?
     assert_equal "true", output.strip
-  end
-
-  def test_notifier_uses_the_native_executable
-    source = File.read(File.join(ROOT, "notifier/notifier.swift"))
-    shell = File.read(SCRIPT)
-
-    assert_includes source, "UNUserNotificationCenter.current()"
-    assert_includes source, "CommandLine.arguments"
-    assert_includes shell, 'Contents/MacOS/brew-autoupdate"'
-    assert_includes shell, '"${notifier_executable}" notify '
-    refute_includes shell, "/usr/bin/open"
   end
 
   def test_notifier_passes_the_summary_as_arguments
@@ -135,19 +124,20 @@ class NotifierTest < Minitest::Test
     assert_includes output, "Warning: notifier failed to display the update result."
   end
 
-  def test_build_marks_the_app_as_able_to_run_the_updater
-    build = File.read(File.join(ROOT, "notifier/build.sh"))
-    source = File.read(File.join(ROOT, "notifier/notifier.swift"))
+  def test_built_executable_rejects_invalid_arguments
+    executable = File.join(ROOT, ".build/debug/brew-autoupdate")
+    skip "run `swift build` first" unless File.executable?(executable)
 
-    assert_includes build, %q(-insert BrewAutoupdateCapabilities -json '["run-updater-1"]')
-    assert_includes source, 'case ("run-updater", 3):'
-  end
+    [[], ["notify", "title"], ["run-updater", "/tmp/log"]].each do |arguments|
+      _stdout, stderr, status = Open3.capture3(executable, *arguments)
 
-  def test_updater_mode_runs_only_the_fixed_updater_script
-    source = File.read(File.join(ROOT, "notifier/notifier.swift"))
+      assert_equal 1, status.exitstatus
+      assert_includes stderr, "usage: brew-autoupdate notify"
+    end
+    _stdout, stderr, status = Open3.capture3(executable, "run-updater", "/tmp/log", "not-a-pid")
 
-    assert_includes source, 'let updater = "\\(supportDirectory)/brew_autoupdate"'
-    assert_includes source, "requireOwnedByUser(updater, type: .typeRegular)"
+    assert_equal 1, status.exitstatus
+    assert_includes stderr, "invalid launcher PID"
   end
 
   private

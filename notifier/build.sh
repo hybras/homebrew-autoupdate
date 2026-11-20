@@ -59,6 +59,10 @@ fi
 # accept. See Autoupdate::Launcher::CAPABILITY.
 /usr/bin/plutil -insert BrewAutoupdateCapabilities -json '["run-updater-1"]' "${build_app}/Contents/Info.plist"
 
+# Lets CI check that the committed app was built from the current sources.
+sources_sha256=$(/bin/cat "${source_file}" "${script_dir}/build.sh" | /usr/bin/shasum -a 256 | /usr/bin/awk '{ print $1 }')
+/usr/bin/plutil -insert BrewAutoupdateSourcesSHA256 -string "${sources_sha256}" "${build_app}/Contents/Info.plist"
+
 /bin/cp "${script_dir}/applet.icns" "${build_app}/Contents/Resources/applet.icns"
 /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${build_app}"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${build_app}"

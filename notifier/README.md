@@ -44,7 +44,8 @@ portable Ruby. The launcher only does this when the app's `Info.plist` lists
 `run-updater-1` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
 it runs the updater script directly. A rebuilt app therefore has to be
 committed together with a `VERSION` bump before users get the new behaviour;
-CI fails until the committed app's executable matches the one `notify.sh` runs.
+`build.sh` records a SHA-256 of `notifier.swift` and `build.sh` in the app's
+`Info.plist`, and CI fails until the committed app matches the current sources.
 
 The `-1` names the current `run-updater` arguments. If they change, list a new
 name (`run-updater-2`) alongside the old one and keep accepting the old
