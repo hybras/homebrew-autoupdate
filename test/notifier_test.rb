@@ -157,7 +157,7 @@ class NotifierTest < Minitest::Test
       log.write(contents)
       log.flush
       stdout, stderr, status = Open3.capture3(
-        { "AUTUPDATE_NOTIFY_PRINT" => "1" },
+        { "AUTOUPDATE_NOTIFY_PRINT" => "1" },
         SCRIPT,
         exit_status.to_s,
         log.path,

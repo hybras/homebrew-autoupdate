@@ -45,7 +45,7 @@ else
   message=${message:-"See the autoupdate log for details."}
 fi
 
-if [[ "${AUTUPDATE_NOTIFY_PRINT:-0}" = "1" ]]
+if [[ "${AUTOUPDATE_NOTIFY_PRINT:-0}" = "1" ]]
 then
   /usr/bin/printf "%s\n%s\n%s\n" "${title}" "${subtitle}" "${message}"
   exit 0
