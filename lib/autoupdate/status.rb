@@ -88,11 +88,25 @@ module Autoupdate
       script.include?("/usr/bin/open -g") ? "yes (legacy)" : "no"
     end
     details << "Notifications: #{notification_mode}"
+    details << "Runs via: #{launch_mode(plist)}"
     details << "Logs: #{plist["StandardOutPath"]}" if plist["StandardOutPath"]
 
     details.join("\n")
   rescue => e
     "Configuration: unable to read (#{e.message})"
+  end
+
+  def launch_mode(plist)
+    unless plist["Program"].to_s.end_with?("/#{Autoupdate::Launcher::SCRIPT_NAME}")
+      return "updater script (legacy; run `brew autoupdate stop` then `start` " \
+             "to run through brew-autoupdate.app)"
+    end
+
+    if Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Notify.notifier_app)
+      "brew-autoupdate.app (grant it App Management to upgrade cask apps in place)"
+    else
+      "updater script (the installed brew-autoupdate.app cannot run updates)"
+    end
   end
 
   def updater_script

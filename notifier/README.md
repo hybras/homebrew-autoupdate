@@ -31,3 +31,17 @@ used by `brew autoupdate --version`.
 
 The build happens in a temporary directory. The committed app is replaced only
 after signing and strict verification succeed.
+
+## Updater mode
+
+The app also runs scheduled updates (`--run-updater <log>`). The launch agent
+runs `brew_autoupdate_launcher`, which opens the app through LaunchServices so
+macOS attributes App Management checks to this app instead of Homebrew's
+portable Ruby. The launcher only does this when the app's `Info.plist` lists
+`run-updater` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
+it runs the updater script directly. A rebuilt app therefore has to be
+committed together with a `VERSION` bump before users get the new behaviour.
+
+App Management grants are tied to the app's code signature. Keep signing with
+the same Developer ID and bundle identifier so existing grants carry over to
+rebuilt apps.

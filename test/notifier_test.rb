@@ -97,7 +97,7 @@ class NotifierTest < Minitest::Test
     shell = File.read(SCRIPT)
 
     assert_includes source, "UNUserNotificationCenter.current()"
-    assert_includes source, "CommandLine.arguments[1]"
+    assert_includes source, "CommandLine.arguments"
     assert_includes shell, "Contents/MacOS/brew-autoupdate-notifier"
     refute_includes shell, "/usr/bin/open"
   end
@@ -121,6 +121,21 @@ class NotifierTest < Minitest::Test
 
     assert_predicate status, :success?
     assert_includes output, "Warning: notifier failed to display the update result."
+  end
+
+  def test_build_marks_the_app_as_able_to_run_the_updater
+    build = File.read(File.join(ROOT, "notifier/build.sh"))
+    source = File.read(File.join(ROOT, "notifier/notifier.swift"))
+
+    assert_includes build, %q(-insert BrewAutoupdateCapabilities -json '["run-updater"]')
+    assert_includes source, 'let runUpdaterFlag = "--run-updater"'
+  end
+
+  def test_updater_mode_runs_only_the_fixed_updater_script
+    source = File.read(File.join(ROOT, "notifier/notifier.swift"))
+
+    assert_includes source, 'let updaterScriptName = "brew_autoupdate"'
+    assert_includes source, "requireOwnedPath(updaterScript, isDirectory: false)"
   end
 
   private

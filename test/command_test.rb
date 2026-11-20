@@ -153,6 +153,13 @@ class CommandTest < Minitest::Test
     assert_includes source, "sudo_gui_script.atomic_write(sudo_gui_script_contents)"
   end
 
+  def test_launch_agent_runs_the_refreshed_launcher
+    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
+
+    assert_equal 2, source.scan("<string>\#{CGI.escapeHTML(launcher_script.to_s)}</string>").length
+    assert_includes source, "launcher_script.read != launcher_script_contents"
+  end
+
   private
 
   def brew_autoupdate(*arguments)

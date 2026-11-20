@@ -218,6 +218,20 @@ module Autoupdate
       end
     end
 
+    # Unlike the updater script, the launcher holds no user options, so it is
+    # refreshed on every start. This lets `stop` + `start` adopt launcher
+    # changes without discarding the configured options.
+    launcher_script = Pathname.new(Autoupdate::Launcher.path(Autoupdate::Core.location))
+    launcher_script_contents = Autoupdate::Launcher.script(
+      app:      Autoupdate::Notify.notifier_app,
+      location: Autoupdate::Core.location.to_s,
+      log:      log_out,
+    )
+    if !launcher_script.exist? || launcher_script.read != launcher_script_contents
+      launcher_script.atomic_write(launcher_script_contents)
+      FileUtils.chmod 0555, launcher_script
+    end
+
     # This restores the "Run At Load" key removed in a7de771abcf6 when requested.
     launch_immediately = if args.immediate?
       <<~EOS
@@ -256,10 +270,10 @@ module Autoupdate
         <key>Label</key>
         <string>#{CGI.escapeHTML(Autoupdate::Core.name)}</string>
         <key>Program</key>
-        <string>#{CGI.escapeHTML("#{Autoupdate::Core.location}/brew_autoupdate")}</string>
+        <string>#{CGI.escapeHTML(launcher_script.to_s)}</string>
         <key>ProgramArguments</key>
         <array>
-            <string>#{CGI.escapeHTML("#{Autoupdate::Core.location}/brew_autoupdate")}</string>
+            <string>#{CGI.escapeHTML(launcher_script.to_s)}</string>
         </array>
         #{launch_immediately.chomp}
         <key>StandardErrorPath</key>
@@ -296,6 +310,18 @@ module Autoupdate
     else
       puts "#{update_message}."
     end
+
+    return if !args.upgrade? || !(HOMEBREW_PREFIX/"Caskroom").exist?
+    return unless Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Notify.notifier_app)
+
+    puts <<~EOS
+
+      To upgrade cask apps in place (keeping their Dock position and settings),
+      turn on "brew-autoupdate" in System Settings > Privacy & Security > App Management.
+      It appears there, switched off, after the first scheduled upgrade macOS blocks;
+      you can also add it now with the + button. The app is located at:
+        #{Autoupdate::Notify.notifier_app}
+    EOS
   end
 
   def shell_export(name, value)

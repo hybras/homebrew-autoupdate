@@ -44,7 +44,7 @@ as `30m`, `12h`, or `1d`, or a 24-hour clock time such as `00:00` to run daily
 at that specific time instead of relative to when the command was run.
 
 _Note:_
-_To ensure that auto-updated cask-based apps are updated in place (so they stay on your Dock), add `~/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate` to System Settings / Privacy and Security / App Management. (Also allow ruby and Terminal.app)_
+_To ensure that auto-updated cask-based apps are updated in place (so they keep their Dock position and settings), turn on `brew-autoupdate` in System Settings / Privacy & Security / App Management. Scheduled runs are launched through this signed helper app, so the permission survives Homebrew's portable Ruby upgrades. The app is added to that list, switched off, the first time macOS blocks a scheduled upgrade (allowing the notification macOS shows is not enough), or you can add it yourself with the + button; `brew autoupdate status` shows whether your setup runs through the app. Setups started with older versions can switch by running `brew autoupdate stop` and then `brew autoupdate start`. Manual `brew upgrade` runs still use your terminal's App Management permission._
 
 ## Example
 
