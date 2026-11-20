@@ -7,9 +7,9 @@ require "open3"
 require "tempfile"
 require "tmpdir"
 
-class NotifierTest < Minitest::Test
+class AppTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__).freeze
-  SCRIPT = File.expand_path("../notifier/notify.sh", __dir__).freeze
+  SCRIPT = File.expand_path("../app/notify-result.sh", __dir__).freeze
   VERSION = File.read(File.join(ROOT, "VERSION")).strip.freeze
 
   def test_reports_an_up_to_date_run
@@ -53,7 +53,7 @@ class NotifierTest < Minitest::Test
   end
 
   def test_committed_app_matches_the_shared_version
-    plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
+    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
     output, status = Open3.capture2(
       "/usr/bin/plutil",
       "-extract",
@@ -67,7 +67,7 @@ class NotifierTest < Minitest::Test
   end
 
   def test_committed_app_has_a_valid_signature
-    app = File.join(ROOT, "notifier/brew-autoupdate.app")
+    app = File.join(ROOT, "app/brew-autoupdate.app")
     _stdout, stderr, status = Open3.capture3(
       "/usr/bin/codesign",
       "--verify",
@@ -80,16 +80,16 @@ class NotifierTest < Minitest::Test
   end
 
   def test_committed_app_was_built_from_the_current_sources
-    plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
+    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
     output, = Open3.capture2("/usr/bin/plutil", "-extract", "BrewAutoupdateSourcesSHA256", "raw", plist)
-    sources = %w[notifier/notifier.swift notifier/build.sh].map { |path| File.binread(File.join(ROOT, path)) }
+    sources = %w[app/BrewAutoupdate.swift app/build.sh].map { |path| File.binread(File.join(ROOT, path)) }
 
     assert_equal Digest::SHA256.hexdigest(sources.join), output.strip,
-                 "Rebuild the committed app with notifier/build.sh"
+                 "Rebuild the committed app with app/build.sh"
   end
 
   def test_committed_app_runs_as_a_background_ui_helper
-    plist = File.join(ROOT, "notifier/brew-autoupdate.app/Contents/Info.plist")
+    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
     output, status = Open3.capture2(
       "/usr/bin/plutil",
       "-extract",
@@ -102,8 +102,8 @@ class NotifierTest < Minitest::Test
     assert_equal "true", output.strip
   end
 
-  def test_notifier_passes_the_summary_as_arguments
-    output, status = invoke_fake_notifier(0, "Already up-to-date.\n")
+  def test_passes_the_summary_to_the_app
+    output, status = invoke_fake_app(0, "Already up-to-date.\n")
 
     assert_predicate status, :success?
     assert_equal(
@@ -117,11 +117,25 @@ class NotifierTest < Minitest::Test
     )
   end
 
-  def test_notifier_failure_is_reported_without_failing_autoupdate
-    output, status = invoke_fake_notifier(0, "Already up-to-date.\n", helper_status: 1)
+  def test_the_old_notifier_path_forwards_to_the_renamed_script
+    Tempfile.create("autoupdate-notify") do |log|
+      log.write("Already up-to-date.\n")
+      log.flush
+      stdout, status = Open3.capture2(
+        { "AUTOUPDATE_NOTIFY_PRINT" => "1" },
+        File.join(ROOT, "notifier/notify.sh"), "0", log.path, "always", "/old/notifier/brew-autoupdate.app"
+      )
+
+      assert_predicate status, :success?
+      assert_includes stdout, "Homebrew is already up-to-date."
+    end
+  end
+
+  def test_app_failure_is_reported_without_failing_autoupdate
+    output, status = invoke_fake_app(0, "Already up-to-date.\n", helper_status: 1)
 
     assert_predicate status, :success?
-    assert_includes output, "Warning: notifier failed to display the update result."
+    assert_includes output, "Warning: could not display the update result."
   end
 
   def test_built_executable_rejects_invalid_arguments
@@ -143,7 +157,7 @@ class NotifierTest < Minitest::Test
   private
 
   def summarize(exit_status, contents, mode: "always")
-    Tempfile.create("autoupdate-notifier") do |log|
+    Tempfile.create("autoupdate-notify") do |log|
       log.write(contents)
       log.flush
       stdout, stderr, status = Open3.capture3(
@@ -157,8 +171,8 @@ class NotifierTest < Minitest::Test
     end
   end
 
-  def invoke_fake_notifier(exit_status, contents, helper_status: 0)
-    Dir.mktmpdir("autoupdate-notifier-app") do |app|
+  def invoke_fake_app(exit_status, contents, helper_status: 0)
+    Dir.mktmpdir("autoupdate-app") do |app|
       executable = File.join(app, "Contents/MacOS/brew-autoupdate")
       FileUtils.mkdir_p(File.dirname(executable))
       File.write(
@@ -171,7 +185,7 @@ class NotifierTest < Minitest::Test
       )
       FileUtils.chmod(0755, executable)
 
-      Tempfile.create("autoupdate-notifier") do |log|
+      Tempfile.create("autoupdate-notify") do |log|
         log.write(contents)
         log.flush
         stdout, stderr, status = Open3.capture3(

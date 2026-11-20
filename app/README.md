@@ -1,7 +1,7 @@
-# Notifier maintenance
+# brew-autoupdate app maintenance
 
-`notifier.swift` is the reviewable source for the notification app.
-`notify.sh` summarizes only the output from the current autoupdate run and
+`BrewAutoupdate.swift` is the reviewable source for the helper app.
+`notify-result.sh` summarizes only the output from the current autoupdate run and
 passes the resulting title, subtitle, and message to the app as
 `brew-autoupdate notify <title> <subtitle> <message>`.
 The native helper uses macOS's UserNotifications framework and runs as a
@@ -10,9 +10,9 @@ background UI app, so it does not appear in the Dock.
 ## Validate without signing
 
 ```sh
-bash -n notifier/notify.sh notifier/build.sh
+bash -n app/notify-result.sh app/build.sh
 swift build
-ruby test/notifier_test.rb
+ruby test/app_test.rb
 ```
 
 The package manifest also allows CodeQL to compile and analyze the standalone
@@ -24,7 +24,7 @@ committed app.
 Set the identity exactly as shown by `security find-identity -v -p codesigning`:
 
 ```sh
-CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" notifier/build.sh
+CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" app/build.sh
 ```
 
 The app version is read from the repository's `VERSION` file, which is also
@@ -32,6 +32,9 @@ used by `brew autoupdate --version`.
 
 The build happens in a temporary directory. The committed app is replaced only
 after signing and strict verification succeed.
+
+`../notifier/notify.sh` forwards to `notify-result.sh` for updater scripts
+generated before this directory was renamed from `notifier/`.
 
 ## Updater mode
 
@@ -44,7 +47,7 @@ portable Ruby. The launcher only does this when the app's `Info.plist` lists
 `run-updater-1` in `BrewAutoupdateCapabilities` (added by `build.sh`); otherwise
 it runs the updater script directly. A rebuilt app therefore has to be
 committed together with a `VERSION` bump before users get the new behaviour;
-`build.sh` records a SHA-256 of `notifier.swift` and `build.sh` in the app's
+`build.sh` records a SHA-256 of `BrewAutoupdate.swift` and `build.sh` in the app's
 `Info.plist`, and CI fails until the committed app matches the current sources.
 
 The `-1` names the current `run-updater` arguments. If they change, list a new

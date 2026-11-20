@@ -21,7 +21,7 @@ jobs:
         run: brew trust aws/tap azure/bicep
 
       # Before the tests, which also exercise the built executable.
-      - name: Build the notifier
+      - name: Build the app
         run: swift build
 
       - name: Run tests
@@ -32,8 +32,8 @@ jobs:
 
       - name: Validate notifier sources
         run: |
-          bash -n notifier/notify.sh notifier/build.sh
+          bash -n app/notify-result.sh app/build.sh notifier/notify.sh
           test "$(cat VERSION)" = \
-            "$(plutil -extract CFBundleShortVersionString raw notifier/brew-autoupdate.app/Contents/Info.plist)"
+            "$(plutil -extract CFBundleShortVersionString raw app/brew-autoupdate.app/Contents/Info.plist)"
 
       - run: brew style "$GITHUB_REPOSITORY"

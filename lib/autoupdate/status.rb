@@ -66,7 +66,7 @@ module Autoupdate
              "to run through brew-autoupdate.app)"
     end
 
-    if Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Notify.notifier_app)
+    if Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Core.app.to_s)
       "brew-autoupdate.app (grant it App Management to upgrade cask apps in place)"
     else
       "updater script (the installed brew-autoupdate.app cannot run updates)"

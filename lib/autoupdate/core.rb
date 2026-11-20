@@ -28,6 +28,11 @@ module Autoupdate
       Pathname.new(File.expand_path("~/Library/Application Support/#{name}"))
     end
 
+    # The signed helper app that posts notifications and runs scheduled updates.
+    def app
+      tap_dir/"app/brew-autoupdate.app"
+    end
+
     def config_file
       location/"config.json"
     end

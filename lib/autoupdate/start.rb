@@ -145,7 +145,7 @@ module Autoupdate
     if config.sudo
       write_executable(sudo_askpass, Autoupdate::Script.sudo_askpass(
                                        prefix: HOMEBREW_PREFIX,
-                                       icon:   Autoupdate::Core.tap_dir/"notifier/applet.icns",
+                                       icon:   Autoupdate::Core.tap_dir/"app/applet.icns",
                                      ))
     end
 
@@ -173,7 +173,7 @@ module Autoupdate
     # Unlike the updater script, the launcher holds no user options, so it is
     # refreshed on every start.
     write_executable(Pathname(Autoupdate::Launcher.path(location)), Autoupdate::Launcher.script(
-                                                                      app:      Autoupdate::Notify.notifier_app,
+                                                                      app:      Autoupdate::Core.app.to_s,
                                                                       location: location.to_s,
                                                                       log:,
                                                                     ))
@@ -215,7 +215,7 @@ module Autoupdate
     end
 
     return if !config.upgrade || !casks_installed?
-    return unless Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Notify.notifier_app)
+    return unless Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Core.app.to_s)
 
     puts <<~EOS
 
@@ -223,7 +223,7 @@ module Autoupdate
       turn on "brew-autoupdate" in System Settings > Privacy & Security > App Management.
       It appears there, switched off, after the first scheduled upgrade macOS blocks;
       you can also add it now with the + button. The app is located at:
-        #{Autoupdate::Notify.notifier_app}
+        #{Autoupdate::Core.app}
     EOS
   end
 end

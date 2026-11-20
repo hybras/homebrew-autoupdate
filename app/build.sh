@@ -3,7 +3,7 @@
 set -eu
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
-source_file="${script_dir}/notifier.swift"
+source_file="${script_dir}/BrewAutoupdate.swift"
 output_app="${script_dir}/brew-autoupdate.app"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
@@ -83,7 +83,7 @@ then
   then
     /bin/mv "${backup_app}" "${output_app}"
   fi
-  echo "The installed app failed verification; restored the previous notifier app." >&2
+  echo "The installed app failed verification; restored the previous app." >&2
   exit 1
 fi
 
