@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
-require "system_command"
-
 module Autoupdate
   module_function
 
   def delete
-    SystemCommand.quiet_system "/bin/launchctl", "unload", Autoupdate::Core.plist
+    Autoupdate::Launchd.unload
     Autoupdate.cleanup
 
     puts "Homebrew will no longer autoupdate and the plist has been deleted."

@@ -11,9 +11,7 @@ module Autoupdate
   module_function
 
   def start(interval:, args:)
-    # Method from Homebrew.
-    # https://github.com/Homebrew/brew/blob/c9c7f4/Library/Homebrew/utils/popen.rb
-    if Utils.popen_read("/bin/launchctl", "list").include?(Autoupdate::Core.name)
+    if Autoupdate::Launchd.loaded?
       odie <<~EOS
         The command already appears to have been started.
         Please run `brew autoupdate delete` and try again.
@@ -302,7 +300,7 @@ module Autoupdate
     end
 
     File.open(Autoupdate::Core.plist, "w") { |f| f << file }
-    SystemCommand.quiet_system "/bin/launchctl", "load", Autoupdate::Core.plist
+    Autoupdate::Launchd.load(Autoupdate::Core.plist)
 
     update_message = "Homebrew will now automatically update every #{Autoupdate::Interval.describe(interval)}"
     if args.immediate?
