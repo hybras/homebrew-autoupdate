@@ -86,7 +86,7 @@ func runUpdater(log: String, launcherPID: pid_t) {
   guard let home = getpwuid(getuid())?.pointee.pw_dir else {
     fail("could not determine the home directory")
   }
-  let supportDirectory = "\(String(cString: home))/Library/Application Support/com.github.domt4.homebrew-autoupdate"
+  let supportDirectory = "\(String(cString: home))/Library/Application Support/com.github.hybras.homebrew-autoupdate"
   let updater = "\(supportDirectory)/brew_autoupdate"
   requireOwnedByUser(supportDirectory, type: .typeDirectory)
   requireOwnedByUser(updater, type: .typeRegular)

@@ -1,11 +1,18 @@
 # frozen_string_literal: true
 
+require "pathname"
+
 module Autoupdate
   module Core
     module_function
 
     def name
-      "com.github.domt4.homebrew-autoupdate"
+      "com.github.hybras.homebrew-autoupdate"
+    end
+
+    # Changing it resets the app's App Management and notification permission.
+    def bundle_id
+      "#{name}.autoupdater"
     end
 
     def plist
@@ -39,6 +46,11 @@ module Autoupdate
 
     def updater
       location/"brew_autoupdate"
+    end
+
+    # The app writes each run's exit status here, since `open -W` drops it.
+    def status_file
+      location/"brew_autoupdate.status"
     end
 
     # The checkout this code was loaded from, wherever it is tapped.

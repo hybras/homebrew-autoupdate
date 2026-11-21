@@ -49,7 +49,7 @@ fi
 /usr/bin/plutil -insert CFBundleDevelopmentRegion -string "en" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleExecutable -string "${executable_name}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleIdentifier -string \
-  "com.github.domt4.homebrew-autoupdate.autoupdater" "${build_app}/Contents/Info.plist"
+  "com.github.hybras.homebrew-autoupdate.autoupdater" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleInfoDictionaryVersion -string "6.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleName -string "brew-autoupdate" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundlePackageType -string "APPL" "${build_app}/Contents/Info.plist"
