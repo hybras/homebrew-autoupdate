@@ -34,7 +34,7 @@ if tag_section_content:
         )
     except subprocess.CalledProcessError as e:
         print(f"Error running command: {e}")
-        exit()
+        exit(1)
 
     help_command_output_current = tag_section_content.group(1).strip()
     help_command_output_new = remove_ansi_escape_codes(help_command_output_new.strip())
@@ -52,9 +52,10 @@ if tag_section_content:
         readme_content = re.sub(comment_tag_pattern, help, readme_content, flags=re.DOTALL)
         print("Content updated.")
 
-        # Set GitHub Actions output variable
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-            print('changed=true', file=fh)
+        # Set GitHub Actions output variable; absent when run locally.
+        if "GITHUB_OUTPUT" in os.environ:
+            with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+                print("changed=true", file=fh)
     else:
         print("No change detected. Content remains unchanged.")
 else:

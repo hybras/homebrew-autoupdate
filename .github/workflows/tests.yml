@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -15,22 +16,46 @@ jobs:
     steps:
       - name: Set up Homebrew
         id: set-up-homebrew
-        uses: Homebrew/actions/setup-homebrew@main
+        uses: Homebrew/actions/setup-homebrew@ceec4e8419bb3c97ce96e9dda7738499ed5f869d # 2026.11.14.1
 
       - name: Trust preinstalled external taps
         run: brew trust aws/tap azure/bicep
 
+      # Build the real, universal app bundle (ad-hoc signed, since only the
+      # maintainer can sign with the release identity) before the tests,
+      # which check it and run its executable.
+      - name: Build the app
+        run: |
+          echo "BREW_AUTOUPDATE_APP=${RUNNER_TEMP}/brew-autoupdate.app" >> "${GITHUB_ENV}"
+          CODESIGN_IDENTITY=- app/build.sh "${RUNNER_TEMP}/brew-autoupdate.app"
+
+      - name: Build the Swift package
+        run: swift build
+
+      # Run every file and fail at the end, so one failing file (such as the
+      # committed-app check awaiting a signed rebuild) does not hide the rest.
       - name: Run tests
         run: |
+          failed=0
           for test in test/*_test.rb; do
-            ruby "$test"
+            ruby "$test" || failed=1
           done
+          exit "$failed"
 
-      - name: Validate notifier sources
-        run: |
-          bash -n notifier/notify.sh notifier/build.sh
-          swift build
-          test "$(cat VERSION)" = \
-            "$(plutil -extract CFBundleShortVersionString raw notifier/brew-autoupdate.app/Contents/Info.plist)"
+      - name: Check shell scripts
+        if: ${{ !cancelled() }}
+        run: bash -n app/notify-result.sh app/build.sh notifier/notify.sh
 
-      - run: brew style "$GITHUB_REPOSITORY"
+      - name: Upload the app
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: brew-autoupdate-app-adhoc
+          path: ${{ runner.temp }}/brew-autoupdate.app
+          retention-days: 14
+
+      # What `brew tap-new` generates for taps: `brew style` today, plus
+      # `brew readall` and `brew audit` once the tap has formulae or casks.
+      - name: Check tap syntax
+        if: ${{ !cancelled() }}
+        run: brew test-bot --only-tap-syntax

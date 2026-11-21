@@ -9,22 +9,22 @@ let package = Package(
   ],
   products: [
     .executable(
-      name: "brew-autoupdate-notifier",
-      targets: ["BrewAutoupdateNotifier"]
+      name: "brew-autoupdate",
+      targets: ["BrewAutoupdate"]
     ),
   ],
   targets: [
     .executableTarget(
-      name: "BrewAutoupdateNotifier",
-      path: "notifier",
+      name: "BrewAutoupdate",
+      path: "app",
       exclude: [
         "README.md",
         "applet.icns",
         "brew-autoupdate.app",
         "build.sh",
-        "notify.sh",
+        "notify-result.sh",
       ],
-      sources: ["notifier.swift"]
+      sources: ["BrewAutoupdate.swift"]
     ),
   ]
 )

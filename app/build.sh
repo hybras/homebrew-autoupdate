@@ -1,17 +1,21 @@
 #!/bin/bash
 
+# Usage: CODESIGN_IDENTITY=<identity> app/build.sh [output.app]
+# Builds, signs and verifies the app, then installs it at output.app, which
+# defaults to the committed app. CI passes `-` (ad-hoc) and a temporary path.
+
 set -eu
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
-source_file="${script_dir}/notifier.swift"
-output_app="${script_dir}/brew-autoupdate.app"
+source_file="${script_dir}/BrewAutoupdate.swift"
+output_app="${1:-${script_dir}/brew-autoupdate.app}"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
 version=$(<"${version_file}")
-build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate-notifier.XXXXXX")
+build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate.XXXXXX")
 build_app="${build_dir}/brew-autoupdate.app"
 backup_app="${build_dir}/previous.app"
-executable_name="brew-autoupdate-notifier"
+executable_name="brew-autoupdate"
 
 trap '/bin/rm -rf "$build_dir"' EXIT
 
@@ -54,26 +58,39 @@ fi
 /usr/bin/plutil -insert CFBundleIconFile -string "applet" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSMinimumSystemVersion -string "11.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSUIElement -bool true "${build_app}/Contents/Info.plist"
+# The generated launcher checks this before opening the app in updater mode,
+# so an app is never asked to run the updater with arguments it does not
+# accept. See Autoupdate::Launcher::CAPABILITY.
+/usr/bin/plutil -insert BrewAutoupdateCapabilities -json '["run-updater-1"]' "${build_app}/Contents/Info.plist"
+
+# Lets CI check that the committed app was built from the current sources.
+/bin/cat "${source_file}" "${script_dir}/build.sh" >"${build_dir}/sources"
+sources_sha256=$(/usr/bin/shasum -a 256 "${build_dir}/sources")
+sources_sha256=${sources_sha256%% *}
+/usr/bin/plutil -insert BrewAutoupdateSourcesSHA256 -string "${sources_sha256}" "${build_app}/Contents/Info.plist"
 
 /bin/cp "${script_dir}/applet.icns" "${build_app}/Contents/Resources/applet.icns"
 /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${build_app}"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${build_app}"
 
+/bin/mkdir -p "$(/usr/bin/dirname "${output_app}")"
 if [[ -d "${output_app}" ]]
 then
   /bin/mv "${output_app}" "${backup_app}"
 fi
 /bin/mv "${build_app}" "${output_app}"
 
-if ! /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${output_app}" ||
-   ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
+# The app was signed in the build directory. Verify it again in place, since
+# moving it across volumes could drop parts of the bundle, and keep the
+# previous app if it no longer verifies.
+if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
 then
   /bin/rm -rf "${output_app}"
   if [[ -d "${backup_app}" ]]
   then
     /bin/mv "${backup_app}" "${output_app}"
   fi
-  echo "Signing failed; restored the previous notifier app." >&2
+  echo "The installed app failed verification; restored the previous app." >&2
   exit 1
 fi
 

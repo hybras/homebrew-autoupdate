@@ -28,14 +28,22 @@ module Autoupdate
       Pathname.new(File.expand_path("~/Library/Application Support/#{name}"))
     end
 
-    def tap_dir
-      origin = if Tap.fetch("homebrew/homebrew-autoupdate").path.exist?
-        "Homebrew"
-      else
-        "domt4"
-      end
+    # The signed helper app that posts notifications and runs scheduled updates.
+    def app
+      tap_dir/"app/brew-autoupdate.app"
+    end
 
-      Pathname.new(File.join(HOMEBREW_LIBRARY, "Taps", origin, "homebrew-autoupdate"))
+    def config_file
+      location/"config.json"
+    end
+
+    def updater
+      location/"brew_autoupdate"
+    end
+
+    # The checkout this code was loaded from, wherever it is tapped.
+    def tap_dir
+      Pathname.new(File.expand_path("../..", __dir__))
     end
   end
 end

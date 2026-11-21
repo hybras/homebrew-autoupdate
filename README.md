@@ -19,9 +19,14 @@ Pass `--notify-on-error` to suppress successful-run notifications, or
 Tap the repository and trust its external command:
 
 ```sh
-brew tap domt4/autoupdate
-brew trust --command domt4/autoupdate/autoupdate
+brew tap hybras/autoupdate
+brew trust --command hybras/autoupdate/autoupdate
 ```
+
+This is a fork of [DomT4/homebrew-autoupdate](https://github.com/DomT4/homebrew-autoupdate).
+Only one tap can provide `brew autoupdate`, so if you have DomT4's tap
+installed, remove it first with `brew untap domt4/autoupdate`. An existing
+schedule keeps working: this tap manages the same launch agent.
 
 Homebrew is moving towards requiring explicit trust before loading commands
 from non-official taps. Command-scoped trust is recommended here because it
@@ -43,8 +48,28 @@ The interval defaults to 24 hours and accepts seconds or a short duration such
 as `30m`, `12h`, or `1d`, or a 24-hour clock time such as `00:00` to run daily
 at that specific time instead of relative to when the command was run.
 
-_Note:_
-_To ensure that auto-updated cask-based apps are updated in place (so they stay on your Dock), add `~/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate` to System Settings / Privacy and Security / App Management. (Also allow ruby and Terminal.app)_
+### Upgrading apps in place (App Management)
+
+When `--upgrade` includes casks, macOS only lets Homebrew update an app in
+place (keeping its Dock position and settings) if the upgrade runs with App
+Management permission. Scheduled runs go through the `brew-autoupdate` helper
+app, so the permission belongs to that app and survives Homebrew's Ruby
+upgrades.
+
+1. Open System Settings > Privacy & Security > App Management.
+2. Click **+**, press Cmd+Shift+G and enter the app's path, shown at the end
+   of `brew autoupdate start --upgrade`.
+3. Make sure the switch is on.
+
+The app may not appear in that list, or may not stay visible, even when the
+permission is in effect, so don't rely on the list. Allowing the "prevented
+from modifying apps" notification alone does not grant it either. Without the
+permission, Homebrew still upgrades the app, but by reinstalling it.
+
+`brew autoupdate status` shows whether your setup runs through the app.
+Setups started with older versions switch over after `brew autoupdate stop`
+and `brew autoupdate start`. Manual `brew upgrade` runs keep using your
+terminal's permission.
 
 ## Example
 
@@ -70,7 +95,7 @@ supported, including tap-qualified names (`homebrew/cask/firefox`) and
 versioned formulae (`node@20`).
 
 Cannot be combined with `--leaves-only`. To change which packages are
-auto-upgraded, run `brew autoupdate delete` then start again with the new list.
+auto-upgraded, run `brew autoupdate stop` then start again with the new list.
 
 ### Run at a specific time every day
 
@@ -89,7 +114,7 @@ over repeated runs).
 <!-- HELP-COMMAND-OUTPUT:START -->
 
 ```help
-From tap: domt4/autoupdate
+From tap: hybras/autoupdate
 Usage: brew autoupdate subcommand [options]
 
 An easy, convenient way to automatically update Homebrew.
@@ -147,11 +172,13 @@ Subcommands:
   -v, --verbose                    Make some output more verbose.
   -h, --help                       Show this message.
 
-From tap: domt4/autoupdate
+From tap: hybras/autoupdate
 Usage: brew autoupdate start [interval] [options]:
     Start autoupdating in the background. The interval defaults to 24 hours and
 accepts seconds or a suffix such as 30m, 12h, or 1d, or a 24-hour clock
-time such as 00:00 to run daily at that specific time.
+time such as 00:00 to run daily at that specific time. After stop, running
+start with no interval or options resumes with the saved options; otherwise
+the given ones replace them.
 
   -d, --debug                      Display any debugging information.
   -q, --quiet                      Make some output more quiet.
@@ -176,7 +203,7 @@ time such as 00:00 to run daily at that specific time.
       --notify-on-error            Notify only when an autoupdate run fails.
       --no-notify                  Disable autoupdate notifications.
 
-From tap: domt4/autoupdate
+From tap: hybras/autoupdate
 Usage: brew autoupdate logs [options]:
     Show output from autoupdate runs.
 
@@ -218,7 +245,47 @@ export HOMEBREW_NO_AUTO_UPDATE="1"
 Please note that Homebrew slightly frowns upon people disabling the built-in
 autoupdate mechanism.
 
-## TO-DO (PRs Welcome)
+## How it works
+
+`brew autoupdate start` saves your options and writes a launch agent plus a few
+small shell scripts to
+`~/Library/Application Support/com.github.domt4.homebrew-autoupdate`. On
+schedule, `launchd` runs a launcher script, which opens the helper app; the
+app runs the updater script, which runs `brew update`, `upgrade` and `cleanup`
+as configured, then reports the result as a notification.
+[ARCHITECTURE](ARCHITECTURE.md) explains the design and the decisions behind
+it.
+
+## Verifying what runs
+
+Everything a scheduled run executes can be read: the scripts in the folder
+above, the Ruby code in this tap, and the helper app's source in
+`app/BrewAutoupdate.swift`. You can rebuild the app yourself with
+`CODESIGN_IDENTITY=- app/build.sh <output.app>`. Builds are reproducible when
+the Swift and SDK versions are the same (see
+[ARCHITECTURE](ARCHITECTURE.md#reproducible-builds)).
+
+## Troubleshooting
+
+- **`brew autoupdate` is refused as untrusted:** run the `brew trust` command
+  from [Installing this command](#installing-this-command).
+- **`status` says "Runs via: updater script (the installed brew-autoupdate.app
+  cannot run updates)":** the committed app is older than this code and
+  hasn't been rebuilt yet; updates still run, but without the helper app.
+- **Apps are reinstalled instead of upgraded in place:** grant App Management
+  as described in [Upgrading apps in place](#upgrading-apps-in-place-app-management).
+- **No notifications:** check System Settings > Notifications for
+  `brew-autoupdate`, and look for "could not display the update result" in
+  `brew autoupdate logs`. macOS 27 is reported to refuse notifications from
+  this app ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255)).
+- **"This setup was created by an older version":** run
+  `brew autoupdate delete`, then `brew autoupdate start` with your options.
+
+## Contributing
+
+See [CONTRIBUTING](CONTRIBUTING.md) for setup, testing and building the app,
+and [ARCHITECTURE](ARCHITECTURE.md) for open design decisions. Issues and pull
+requests are welcome.
 
 ## History
 
