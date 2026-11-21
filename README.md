@@ -259,6 +259,19 @@ as configured, then reports the result as a notification.
 [ARCHITECTURE](ARCHITECTURE.md) explains the design and the decisions behind
 it.
 
+A running job keeps the scripts it was started with. Whenever this tap's
+source changes, whether through `brew update` or your own edits, restart the
+job so it picks the changes up:
+
+```sh
+brew autoupdate stop
+brew autoupdate start
+```
+
+`start` with no options reuses the saved ones. A reminder that a restart is
+due is planned for the job's notification and `brew autoupdate status`, but
+does not exist yet ([details](ARCHITECTURE.md#d38-applying-upgrades)).
+
 ## Verifying what runs
 
 Everything a scheduled run executes can be read: the scripts in the folder

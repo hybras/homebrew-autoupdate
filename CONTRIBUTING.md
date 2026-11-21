@@ -134,6 +134,10 @@ BREW_AUTOUPDATE_APP="$PWD/.build/brew-autoupdate.app" ruby test/app_test.rb
 
 ### Testing on a real job
 
+A registered job does not pick up source changes by itself. After changing
+anything a job runs, restart it with `brew autoupdate stop` then
+`brew autoupdate start` ([D38](ARCHITECTURE.md#d38-applying-upgrades)).
+
 When testing against your own launch agent, back up
 `~/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist` and
 `~/Library/Application Support/com.github.domt4.homebrew-autoupdate/` first,
