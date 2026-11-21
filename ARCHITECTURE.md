@@ -62,8 +62,8 @@ Conventions used throughout:
   [D37](#d37-isolating-jobs-from-tap-upgrades).
 - **G7 (relaxed for personal use). Users learn about an upgrade without
   running a subcommand.** A reminder that a restart is due is mandatory; the
-  restart itself stays manual (`brew autoupdate stop` then
-  `brew autoupdate start`). See [D38](#d38-applying-upgrades).
+  restart itself stays manual (`brew autoupdate restart`, see
+  [D21](#d21-user-cli)). See [D38](#d38-applying-upgrades).
 - **G8. A certificate generated on the user's machine,** with a clear warning
   (as [`mkcert`](https://github.com/FiloSottile/mkcert) does). Using no
   certificate (ad-hoc signing) was the first preference, but was dropped
@@ -200,7 +200,8 @@ trade-offs, research and the goals it touches.
 
 #### D01. Scheduler
 
-- **Status:** Current: our own launch agent.
+- **Status:** Decided: keep our own launch agent. `brew services` would fix
+  options in a formula.
 - **Options:**
   - our own launch agent in the user's GUI domain (current)
   - `brew services` through a formula with a `service do` block: Homebrew
@@ -215,7 +216,8 @@ trade-offs, research and the goals it touches.
 
 #### D02. How the command is delivered
 
-- **Status:** Current: a Ruby `AbstractCommand` in `cmd/autoupdate.rb`.
+- **Status:** Decided: keep the Ruby `AbstractCommand` in `cmd/autoupdate.rb`;
+  it is needed for self-registering subcommands (G1).
 - **Options** ([External Commands](https://docs.brew.sh/External-Commands)):
   - `cmd/autoupdate.rb` (current)
   - an executable `brew-autoupdate` (any language; receives `HOMEBREW_*`
@@ -294,14 +296,15 @@ trade-offs, research and the goals it touches.
 
 #### D04. Dependency between the command and the app
 
-- **Status:** Current: both ship in the same commit; the launcher checks the
-  app's capability marker.
+- **Status:** Decided by [D37](#d37-isolating-jobs-from-tap-upgrades): `start`
+  builds the app from the same tap commit as the scripts it writes, so they
+  cannot drift apart.
 - **Options:** same commit (current) / `start` installs or checks a cask /
   version negotiation through capabilities.
 
 #### D05. Fixing it in Homebrew instead
 
-- **Status:** Open.
+- **Status:** Decided: not pursued; out of scope for a personal fork.
 - **Research:** portable Ruby is "not signed at all" on Intel
   (`codesign -d`), and Homebrew re-signs binaries ad-hoc on Apple silicon. If
   Homebrew signed portable Ruby with a Developer ID, the Ruby's own grant
@@ -350,14 +353,15 @@ trade-offs, research and the goals it touches.
 
 #### D08. Release trigger and changelog
 
-- **Status:** Current: a `version: bump` commit; `brew autoupdate version`
-  greps the git log for it.
+- **Status:** Decided: keep `version: bump` commits, with no release
+  automation. The restart reminder uses the tap's commit
+  ([D38](#d38-applying-upgrades)), so nothing depends on releases.
 - **Options:** current / a tag-driven release workflow ⚙ / a release bot ⚙ /
   GitHub release notes ⚙.
 
 #### D09. Versioning
 
-- **Status:** Current: one `VERSION` file for the command and the app.
+- **Status:** Decided: keep one `VERSION` file.
 - **Options:** shared version (current) / a separate app version /
   capability-only compatibility.
 
@@ -394,8 +398,7 @@ trade-offs, research and the goals it touches.
 
 #### D12. Automated updates
 
-- **Status:** Current: Dependabot keeps pinned actions current ⚙; the README
-  help output is regenerated on `main` ⚙.
+- **Status:** Decided: keep Dependabot and the README help regeneration ⚙.
 - **Options:** if a cask is added, `livecheck` plus the autobump workflow that
   `brew tap-new` generates (`brew bump --no-fork --open-pr --bump-synced`) ⚙.
 
@@ -403,7 +406,11 @@ trade-offs, research and the goals it touches.
 
 #### D13. Where scheduled-run logic lives
 
-- **Status:** Open. Current: a generated shell script frozen at `start`.
+- **Status:** Decided: keep the generated updater script, written into the
+  job's snapshot by `start`. A hidden `brew autoupdate run` would run whatever
+  the tap holds at the time, which breaks the snapshot
+  ([D37](#d37-isolating-jobs-from-tap-upgrades)), and would make every run
+  depend on the command being trusted.
 - **Options:**
   - a generated script (current)
   - a hidden `brew autoupdate run` that reads `config.json`, so every run uses
@@ -416,19 +423,24 @@ trade-offs, research and the goals it touches.
 
 #### D14. Script or config as the interface
 
-- **Status:** Open. Current: the app runs a generated script.
+- **Status:** Decided: the app runs the generated script
+  ([D13](#d13-where-scheduled-run-logic-lives)).
 - **Options:** the app runs a generated script (current) / the app or Ruby
   reads `config.json` directly.
 
 #### D15. Constants shared across languages
 
-- **Status:** Open. Current: duplicated (see G3).
+- **Status:** Decided: keep the duplicates and add a test ⚙ that reads the
+  Swift source and `app/build.sh` and checks they match Ruby's constants. It
+  catches a missed rename ([D32](#d32-label-bundle-id-and-paths)) for little
+  code.
 - **Options:** keep duplicates / pass every path as an argument and validate
   it / generate one side from the other ⚙ / a test that asserts they match ⚙.
 
 #### D16. Launcher
 
-- **Status:** Current: a shell launcher using `open -W`.
+- **Status:** Decided: keep the shell launcher using `open -W`. `SMAppService`
+  is untested and would restructure the app.
 - **Options:**
   - a shell launcher (current)
   - the plist runs `open` directly
@@ -441,23 +453,36 @@ trade-offs, research and the goals it touches.
 
 #### D17. Contract between the app and the launcher
 
-- **Status:** Current: an Info.plist capability marker, a status file, and the
-  launcher's PID for stopping.
+- **Status:** Decided: drop the `run-updater-1` capability marker and its
+  checks in Ruby and the launcher. It existed because the tap's app could be
+  older than the launcher; now `start` builds both together (G2, G3). Keep the
+  status file and the launcher PID.
 - **Options:** the current contract / a `capabilities` subcommand / versioned
   subcommand names.
 - **Experiment needed:** whether `open -W` can report the app's exit status.
 
 #### D18. Summarizing results
 
-- **Status:** Open. Current: `notify-result.sh` parses `brew upgrade`'s text
-  output.
+- **Status:** Decided: summarize from structured data. After `brew update`,
+  the updater runs `brew outdated --json=v2` with the same scope as its
+  upgrade (`--greedy`, `--formula` or `--cask`, the `--only` names or the
+  leaves) and saves the result with the run's log. On success,
+  `notify-result.sh` lists each package with its old and new version using
+  `/usr/bin/jq` (shipped with macOS 15, see
+  [D33](#d33-minimum-macos-version)), skipping pinned formulae; an empty list
+  means nothing needed upgrading. Failures still show the end of the log.
+  Caveat: the list is what was outdated before the upgrade; it equals what was
+  upgraded only because the run stops at the first failure
+  ([D26](#d26-failure-semantics)).
 - **Options:** text parsing (current) / structured data from
   `brew outdated --json=v2` (`name`, `installed_versions`, `current_version`,
   `pinned`) / summarizing in Swift.
 
 #### D19. Ruby module boundaries
 
-- **Status:** Open; serves G1 and G2.
+- **Status:** Decided: adopt `Homebrew::AbstractSubcommand` (G1), with
+  subcommand classes nested under `Homebrew::Cmd::Autoupdate`. `lib/` is then
+  loaded before `cmd_args`, which makes `--help` slightly slower; accepted.
 - **Research (verified in Homebrew's source):**
   - `Homebrew::AbstractSubcommand` (`abstract_subcommand.rb`, `@api public`)
     lets each subcommand declare its own `subcommand_args` and `run`. The
@@ -476,17 +501,17 @@ trade-offs, research and the goals it touches.
 
 #### D20. Swift structure
 
-- **Status:** Open. Current: one top-level file in Swift 5 language mode.
+- **Status:** Decided: one file, moved to the Swift 6 language mode.
 - **Options:** a single file (current) / several files with `swift test` ⚙ /
   Swift 6 language mode.
 
 #### D37. Isolating jobs from tap upgrades
 
-- **Status:** Decided: one snapshot in the support directory. `start` writes the scripts,
-  `notify-result.sh` and `brew-autoupdate.app` there, so nothing a job runs
-  comes from the tap. The app is built in a temporary directory and renamed
-  into place only after signing and verification succeed, as `app/build.sh`
-  already does. Current: jobs use `app/` in the tap (violates G6).
+- **Status:** Decided: one snapshot in the support directory. `start` writes
+  the scripts, `notify-result.sh` and `brew-autoupdate.app` there, so nothing
+  a job runs comes from the tap. The app is built in a temporary directory
+  and renamed into place only after signing and verification succeed, as
+  `app/build.sh` already does. Current: jobs use `app/` in the tap (violates G6).
 - **Options:**
   - jobs use files in the tap (current; violates G6)
   - one snapshot in the support directory (decided)
@@ -504,10 +529,10 @@ trade-offs, research and the goals it touches.
 
 - **Status:** Decided: a manual restart, with a mandatory reminder. Source
   code changes in the tap (a `brew update` that pulls this fork, or local
-  edits) must be followed by a job restart: `brew autoupdate stop` then
-  `brew autoupdate start`. `start` rebuilds the snapshot
-  ([D37](#d37-isolating-jobs-from-tap-upgrades)) from the saved options and
-  keeps App Management, because the certificate is unchanged
+  edits) must be followed by a job restart: `brew autoupdate restart`
+  ([D21](#d21-user-cli); until it exists, `stop` then `start`), which rebuilds
+  the snapshot ([D37](#d37-isolating-jobs-from-tap-upgrades)) from the saved
+  options and keeps App Management, because the certificate is unchanged
   ([D40](#d40-local-signing-certificate)). Until then the job keeps running
   its old snapshot.
 - **Reminders: mandatory.** The restart stays manual, but the user must be
@@ -624,7 +649,13 @@ trade-offs, research and the goals it touches.
 
 #### D21. User CLI
 
-- **Status:** Open.
+- **Status:** Decided: subcommands register themselves
+  ([D19](#d19-ruby-module-boundaries)); add `restart` (`stop`, then `start`
+  with the saved options), which the restart reminder names
+  ([D38](#d38-applying-upgrades)); `start` keeps resuming saved options; drop
+  the hidden legacy switches (G4); `delete` keeps removing logs. No other new
+  commands; `status` reports whether App Management is granted
+  ([D39](#d39-signing-modes)).
 - **Topics:**
   - registration through `AbstractSubcommand` (G1)
   - implicit resume in `start` against an explicit `restart`
@@ -638,22 +669,24 @@ trade-offs, research and the goals it touches.
 
 #### D22. Helper app CLI
 
-- **Status:** Current: `notify` and `run-updater`.
+- **Status:** Decided: keep `notify` and `run-updater`.
 - **Open:** which commands exist, who may call them, input validation, a
   permission self-check, `--version`.
 
 #### D23. Arguments of the notify script
 
-- **Status:** Current: positional arguments.
+- **Status:** Decided: keep positional arguments.
 - **Options:** positional (current) / named options / folded into the app.
 
 ### E. Behaviour and operations
 
 #### D24. Logging
 
-- **Status:** Open. Current: one shared, append-only file with no rotation (it
-  reached about 280,000 lines on one test Mac). Each run already writes a
-  temporary log that is appended to the shared file and then deleted.
+- **Status:** Decided: one log file per run. Each run writes
+  `~/Library/Logs/<label>/runs/<timestamp>.log`, and the updater deletes all
+  but the newest 30 ⚙. launchd keeps its `StandardOutPath` for errors outside
+  a run. `brew autoupdate logs` shows the newest run's log. A notification
+  that opens its run's log needs an app change and is not planned.
 - **Options:**
   - keep the shared file and prune it on each run ⚙ (a user-level `newsyslog`
     configuration is not available)
@@ -666,32 +699,36 @@ trade-offs, research and the goals it touches.
 
 #### D25. Resource policy
 
-- **Status:** Current: background process type, `taskpolicy -b`, no builds
-  from source (`HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK=1`), optional
-  `--ac-only`.
+- **Status:** Decided: keep the current policy: background process type,
+  `taskpolicy -b`, no builds from source
+  (`HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK=1`), optional `--ac-only`.
 - **Open:** network and Low Power Mode checks.
 
 #### D26. Failure semantics
 
-- **Status:** Current: the `&&` chain stops at the first failure.
+- **Status:** Decided: keep the `&&` chain, which stops at the first failure.
 - **Open:** whether casks should still upgrade after a formula failure;
   retries.
 
 #### D27. `sudo`
 
-- **Status:** Current: a pinentry-mac `SUDO_ASKPASS` helper, or the user's own
-  `SUDO_ASKPASS`. Homebrew passes `-A` to `sudo` whenever `SUDO_ASKPASS` is
-  set (`system_command.rb:359`).
+- **Status:** Decided: keep the pinentry-mac `SUDO_ASKPASS` helper, or the
+  user's own `SUDO_ASKPASS`. Homebrew passes `-A` to `sudo` whenever
+  `SUDO_ASKPASS` is set (`system_command.rb:359`).
 
 #### D28. Security model
 
-- **Status:** Open; serves G5.
+- **Status:** Decided: document the accepted risks; nothing to build.
 - **Current safeguards:** the app runs only a fixed script path and refuses
   files that other users could have replaced; `--only` package names are
   validated before they are written into a script.
-- **To document:** user-writable code (scripts, Homebrew, taps) runs with the
-  app's App Management permission. Granting Ruby or a terminal has the same
-  exposure.
+- **Accepted risks:**
+  - Code the user can write (the job's scripts, Homebrew, taps) runs with
+    the app's App Management permission. Granting Ruby or a terminal has the
+    same exposure.
+  - Any process running as the user can sign code with the local
+    certificate ([D40](#d40-local-signing-certificate)).
+  - Both are accepted because only the maintainer uses this fork (G10).
 
 #### D29. Notifications
 
@@ -708,13 +745,12 @@ trade-offs, research and the goals it touches.
 
 #### D30. Setups created by older versions
 
-- **Status:** Current: their updater script is kept as-is when `start` runs
-  without options. G4 allows dropping this.
+- **Status:** Decided: drop support (G4). The rename in
+  [D32](#d32-label-bundle-id-and-paths) needs a fresh `start` anyway.
 
 #### D31. Shims
 
-- **Status:** Current: `notifier/notify.sh` forwards to `app/notify-result.sh`.
-  G4 allows removing it.
+- **Status:** Decided: remove `notifier/notify.sh` (G4).
 
 #### D32. Label, bundle ID and paths
 
@@ -730,12 +766,14 @@ trade-offs, research and the goals it touches.
 
 #### D33. Minimum macOS version
 
-- **Status:** Open. The app declares 11; Homebrew's oldest supported macOS is
-  15 (`HOMEBREW_MACOS_OLDEST_SUPPORTED`, `brew.sh:362`).
+- **Status:** Decided: macOS 15, matching Homebrew's oldest supported version
+  (`HOMEBREW_MACOS_OLDEST_SUPPORTED`, `brew.sh:362`). Current: the app
+  declares 11.
 
 #### D36. Minimum Homebrew version
 
-- **Status:** Open. `AbstractSubcommand` (G1) first shipped in Homebrew 5.1.12.
+- **Status:** Decided: require Homebrew 5.1.12 or later, with no fallback; the
+  maintainer runs current Homebrew.
 - **Options:** require it / check the version and fail clearly / detect the
   feature and fall back. Running CI against the oldest supported version ⚙.
 
@@ -743,19 +781,19 @@ trade-offs, research and the goals it touches.
 
 #### D34. Style per language
 
-- **Status:** Open.
-- **Ruby:** `brew style` (current ⚙; taps use `tap_rubocop_style.yml`).
-  Whether to adopt Sorbet signatures (`cmd/` is `typed: strict`; `lib/` has no
-  sigil).
-- **Swift:** none today. `swift format` ships with the toolchain ⚙.
+- **Status:** Decided, per language below.
+- **Ruby:** `brew style` (current ⚙; taps use `tap_rubocop_style.yml`). No
+  Sorbet signatures in `lib/`: its dependency-free modules are tested with
+  plain `ruby`, which cannot load `sig`. `cmd/` keeps `typed: strict`.
+- **Swift:** `swift format`, which ships with the toolchain ⚙.
 - **Shell:** ShellCheck with every check enabled, plus shfmt, through
   `brew style` (current ⚙). A tap inside the Homebrew checkout inherits
   Homebrew's `.shellcheckrc`, which disables SC2310–SC2312; CI does not, so
-  local and CI results can differ.
-- **Markdown:** markdownlint ⚙.
-- **Tests:** plain-Ruby minitest (current) or RSpec like Homebrew.
-  `AbstractSubcommand` classes need Homebrew loaded, so they can only be tested
-  through `brew`.
+  local and CI results can differ. CONTRIBUTING gives the command that
+  matches CI.
+- **Markdown:** markdownlint in the editor only, not in CI.
+- **Tests:** keep plain-Ruby minitest. `AbstractSubcommand` classes need
+  Homebrew loaded, so they are tested through `brew` (`test/command_test.rb`).
 - **Commits and spelling:** upstream uses `area: summary` subjects.
 
 ### H. Relationship to upstream
