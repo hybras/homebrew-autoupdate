@@ -110,6 +110,36 @@ class ScriptTest < Minitest::Test
     refute_includes run_logs, File.join(@dir, "runs", "2000-01-01-000000.log")
   end
 
+  def test_reminds_to_restart_when_the_tap_has_changed
+    output, = run_updater(config(commit: "0" * 40))
+
+    assert_includes output, "notify 0 #{Autoupdate::Script::RESTART_REMINDER}"
+  end
+
+  def test_does_not_remind_at_the_commit_the_job_was_started_from
+    tap = File.join(@dir, "tap")
+    system("git", "init", "--quiet", tap, exception: true)
+    system("git", "-C", tap, "-c", "user.name=t", "-c", "user.email=t@example.com",
+           "commit", "--quiet", "--allow-empty", "--message=t", exception: true)
+    output, = run_updater(config(commit: `git -C #{tap} rev-parse HEAD`.strip))
+
+    refute_includes output, Autoupdate::Script::RESTART_REMINDER
+  end
+
+  def test_records_whether_the_run_had_app_management
+    # Checked before /Applications; outside it, macOS does not protect apps.
+    FileUtils.mkdir_p(File.join(@dir, "Applications", "Example.app"))
+    run_updater(config(upgrade: true), env: { "HOME" => @dir, "BREW_AUTOUPDATE_RUN_BY_APP" => "1" })
+
+    assert_match(/\Agranted \(/, File.read(File.join(@dir, "app_management")))
+  end
+
+  def test_does_not_check_app_management_outside_the_app
+    run_updater(config(upgrade: true), env: { "BREW_AUTOUPDATE_RUN_BY_APP" => nil })
+
+    assert_match(/\Anot checked: this run did not go through/, File.read(File.join(@dir, "app_management")))
+  end
+
   def test_exports_the_captured_environment
     environment = { "PATH" => "/usr/bin:/bin", "HOMEBREW_CASK_OPTS" => "--appdir=~/My Apps" }
     script = Autoupdate::Script.updater(config(environment:), **paths)
@@ -173,11 +203,13 @@ class ScriptTest < Minitest::Test
 
   def paths(casks: true)
     {
-      brew:           @brew,
+      brew:                @brew,
       casks:,
-      sudo_askpass:   File.join(@dir, "sudo askpass"),
-      notify_command: 'echo "notify $status"',
-      runs:           File.join(@dir, "runs"),
+      sudo_askpass:        File.join(@dir, "sudo askpass"),
+      notify_command:      'echo "notify $status $reminder"',
+      runs:                File.join(@dir, "runs"),
+      tap:                 File.join(@dir, "tap"),
+      app_management_file: File.join(@dir, "app_management"),
     }
   end
 

@@ -7,7 +7,7 @@ require_relative "../lib/autoupdate/config"
 class ConfigTest < Minitest::Test
   def test_round_trips_through_the_saved_file
     [86_400, Autoupdate::Interval.parse("02:23")].each do |interval|
-      config = config(interval:, only: %w[wget firefox], environment: { "PATH" => "/bin" })
+      config = config(interval:, only: %w[wget firefox], environment: { "PATH" => "/bin" }, commit: "abc123")
 
       Dir.mktmpdir do |dir|
         path = File.join(dir, "config.json")

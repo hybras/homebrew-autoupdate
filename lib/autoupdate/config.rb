@@ -5,8 +5,9 @@ require_relative "interval"
 
 module Autoupdate
   # The options chosen with `brew autoupdate start`, plus the environment
-  # captured when it ran. They are saved so that every `start` can regenerate
-  # the scripts from them, and so `status` can describe them.
+  # captured and the tap's commit when it ran. They are saved so that every
+  # `start` can regenerate the scripts from them, and so `status` can describe
+  # them and tell when the tap has changed since.
   Config = Struct.new(
     :interval,    # Integer seconds, or an Interval::CalendarTime
     :run_at_load, # also run when the agent is loaded (`--immediate`)
@@ -19,12 +20,13 @@ module Autoupdate
     :ac_only,
     :notify,      # "always", "error" or "never"
     :environment, # Hash of variables exported to every run
+    :commit,      # the tap's git commit the job's files were made from, or nil
     keyword_init: true,
   )
 
   class Config
     # Bump when the saved format changes incompatibly.
-    FORMAT_VERSION = 1
+    FORMAT_VERSION = 2
 
     def self.load(path)
       data = JSON.parse(File.read(path))

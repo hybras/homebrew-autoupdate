@@ -6,8 +6,11 @@ status=${1:?missing exit status}
 run_log=${2:?missing run log}
 mode=${3:-always}
 app=${4:-}
+# Set when the tap has changed since the job was started. It is shown even
+# when only failures are notified, since the job needs a restart.
+reminder=${5:-}
 
-if [[ "${mode}" = "never" ]] || { [[ "${mode}" = "error" ]] && [[ "${status}" -eq 0 ]]; }
+if [[ "${mode}" = "never" ]] || { [[ "${mode}" = "error" ]] && [[ "${status}" -eq 0 ]] && [[ -z "${reminder}" ]]; }
 then
   exit 0
 fi
@@ -44,6 +47,11 @@ else
     }' "${run_log}"
   )
   message=${message:-"See the autoupdate log for details."}
+fi
+
+if [[ -n "${reminder}" ]]
+then
+  message="${message}"$'\n'"${reminder}"
 fi
 
 if [[ "${AUTOUPDATE_NOTIFY_PRINT:-0}" = "1" ]]

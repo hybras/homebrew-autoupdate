@@ -61,9 +61,21 @@ module Autoupdate
       location/"brew_autoupdate"
     end
 
+    # Each run that upgrades casks records here whether it had App
+    # Management permission.
+    def app_management_file
+      location/"app_management"
+    end
+
     # The app writes each run's exit status here, since `open -W` drops it.
     def status_file
       location/"brew_autoupdate.status"
+    end
+
+    # The commit the tap is at, or nil when it is not a git checkout. A job
+    # made from another commit needs `brew autoupdate restart`.
+    def tap_commit
+      Utils.popen_read("git", "-C", tap_dir, "rev-parse", "HEAD").strip.presence
     end
 
     # The checkout this code was loaded from, wherever it is tapped.

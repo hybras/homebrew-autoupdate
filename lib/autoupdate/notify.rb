@@ -14,6 +14,7 @@ module Autoupdate
         "\"$run_log\"",
         Shellwords.escape(mode),
         Shellwords.escape(Autoupdate::Core.app.to_s),
+        "\"$reminder\"",
       ].join(" ")
     end
   end

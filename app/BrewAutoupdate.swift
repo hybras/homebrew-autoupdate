@@ -106,6 +106,11 @@ func runUpdater(log: String, launcherPID: pid_t) {
   let updaterProcess = Process()
   updaterProcess.executableURL = URL(fileURLWithPath: "/usr/sbin/taskpolicy")
   updaterProcess.arguments = ["-b", "/bin/sh", updater]
+  // Tells the updater that macOS holds this app responsible for it, so its
+  // App Management check reflects this app's permission.
+  updaterProcess.environment = ProcessInfo.processInfo.environment.merging(
+    ["BREW_AUTOUPDATE_RUN_BY_APP": "1"]
+  ) { _, new in new }
   updaterProcess.standardInput = FileHandle.nullDevice
   updaterProcess.standardOutput = logHandle
   updaterProcess.standardError = logHandle

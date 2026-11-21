@@ -38,6 +38,7 @@ module Autoupdate
       FileUtils.mkpath(location)
       log = log_path
 
+      config.commit = Autoupdate::Core.tap_commit
       config.save(Autoupdate::Core.config_file)
       build_app
       write_scripts(config, location:, log:)
@@ -156,14 +157,17 @@ module Autoupdate
                                        ))
       end
 
-      write_executable(Autoupdate::Core.updater, Autoupdate::Script.updater(
-                                                   config,
-                                                   brew:           Autoupdate::Core.brew,
-                                                   casks:          Autoupdate::Core.casks_installed?,
-                                                   sudo_askpass:   sudo_askpass.to_s,
-                                                   notify_command: Autoupdate::Notify.command(mode: config.notify),
-                                                   runs:           Autoupdate::Core.runs.to_s,
-                                                 ))
+      core = Autoupdate::Core
+      write_executable(core.updater, Autoupdate::Script.updater(
+                                       config,
+                                       brew:                core.brew,
+                                       casks:               core.casks_installed?,
+                                       sudo_askpass:        sudo_askpass.to_s,
+                                       notify_command:      Autoupdate::Notify.command(mode: config.notify),
+                                       runs:                core.runs.to_s,
+                                       tap:                 core.tap_dir.to_s,
+                                       app_management_file: core.app_management_file.to_s,
+                                     ))
 
       write_executable(Pathname(Autoupdate::Launcher.path(location)), Autoupdate::Launcher.script(
                                                                         app:      Autoupdate::Core.app.to_s,

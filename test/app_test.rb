@@ -64,6 +64,12 @@ class AppTest < Minitest::Test
     assert_empty output
   end
 
+  def test_error_mode_still_shows_the_restart_reminder
+    output, = summarize(0, "Already up-to-date.", mode: "error", reminder: "Restart, please.")
+
+    assert_includes output, "Homebrew is already up-to-date.\nRestart, please."
+  end
+
   def test_passes_the_summary_to_the_app
     output, status = invoke_fake_app(0, "Already up-to-date.\n")
 
@@ -135,7 +141,7 @@ class AppTest < Minitest::Test
     output.strip
   end
 
-  def summarize(exit_status, contents, mode: "always", outdated: nil)
+  def summarize(exit_status, contents, mode: "always", outdated: nil, reminder: "")
     Dir.mktmpdir("autoupdate-notify") do |dir|
       log = File.join(dir, "run.log")
       File.write(log, contents)
@@ -146,6 +152,8 @@ class AppTest < Minitest::Test
         exit_status.to_s,
         log,
         mode,
+        "",
+        reminder,
       )
       ["#{stdout}#{stderr}", status]
     end
