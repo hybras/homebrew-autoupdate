@@ -28,6 +28,7 @@ Conventions used throughout:
 - [Files on disk](#files-on-disk)
 - [Lifecycles](#lifecycles)
 - [Decisions](#decisions)
+- [Known issues](#known-issues)
 - [Appendix: experiments](#appendix-experiments)
 - [Prior art](#prior-art)
 - [This fork compared with upstream](#this-fork-compared-with-upstream)
@@ -683,14 +684,14 @@ trade-offs, research and the goals it touches.
 
 #### D29. Notifications
 
-- **Status:** Open.
+- **Status:** Decided: notifications stay as they are, and the possible
+  macOS 27 refusal is not handled for now
+  ([known issue](#macos-27-may-refuse-notifications)).
 - **Research:** no certificate is needed on macOS 15 when the app lives under
-  the home folder ([details](#notifications)). macOS 27 is reported to need
-  notarization ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255),
-  unverified).
-- **Options:** make notifications optional and report failures in `status`
-  and the log. Notarizing is not available, because nothing is distributed
-  (G10, [D07](#d07-notarization)).
+  the home folder ([details](#notifications)).
+- **Options for later:** make notifications optional and report failures in
+  `status` and the log. Notarizing is not available, because nothing is
+  distributed (G10, [D07](#d07-notarization)).
 
 ### F. Identity and compatibility
 
@@ -753,6 +754,32 @@ trade-offs, research and the goals it touches.
 - **Status:** Decided for now: neither. This fork is not published for others
   to consume (G10). See [Merging upstream or replacing it](#merging-upstream-or-replacing-it)
   for what either would involve.
+
+## Known issues
+
+### macOS 27 may refuse notifications
+
+- **Status:** not handled for now ([D29](#d29-notifications)). Unverified:
+  no macOS 27 machine has been tested.
+- **Report:** [#255](https://github.com/DomT4/homebrew-autoupdate/issues/255)
+  (macOS 27.2, Apple silicon) says macOS refuses notification permission,
+  with no prompt, to apps that are not notarized: upstream's Developer ID
+  app, and ad-hoc and self-signed apps too. Notarized apps work. The app
+  built by `start` is self-signed and cannot be notarized (G10,
+  [D07](#d07-notarization)), so it would be affected.
+- **What would stop working:**
+  - the notification after each run, including failures
+  - the notice that an upgrade is waiting ([D38](#d38-applying-upgrades))
+- **What would keep working:**
+  - scheduled updates, which do not depend on notifications
+  - each run's output in `brew autoupdate logs`, which records "could not
+    display the update result" (`app/notify-result.sh`). `status` does not
+    show run results today.
+- **Untested on macOS 27:** App Management through the self-signed app,
+  which is a separate permission and is not covered by the report.
+- **If it is confirmed:** take up the options in [D29](#d29-notifications),
+  starting with making `status` show the last run's result and any waiting
+  upgrade.
 
 ## Appendix: experiments
 

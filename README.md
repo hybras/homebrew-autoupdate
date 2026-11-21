@@ -280,7 +280,10 @@ the Swift and SDK versions are the same (see
 - **No notifications:** check System Settings > Notifications for
   `brew-autoupdate`, and look for "could not display the update result" in
   `brew autoupdate logs`. macOS 27 is reported to refuse notifications from
-  this app ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255)).
+  apps that are not notarized, which includes this one
+  ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255)). This is
+  not handled yet; updates still run, so check `brew autoupdate logs`
+  instead ([known issue](ARCHITECTURE.md#macos-27-may-refuse-notifications)).
 - **"This setup was created by an older version":** run
   `brew autoupdate delete`, then `brew autoupdate start` with your options.
 
