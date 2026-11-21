@@ -166,7 +166,7 @@ Every contract that crosses a language boundary, and where each side lives:
 | `~/Library/LaunchAgents/<label>.plist` | `start` | schedule, logs, runs the launcher |
 | `~/Library/Application Support/<label>/config.json` | `start` | saved options, captured environment and the tap's commit |
 | `…/brew-autoupdate.app` | `start` (rebuilt when its source changes) | the app, signed with the local certificate |
-| `…/signing.keychain-db`, `…/signing.password` | `start` (once) | the local signing certificate ([D40](#d40-local-signing-certificate)) |
+| Login keychain: `brew-autoupdate local signing` | `start` (once) | the local signing certificate ([D40](#d40-local-signing-certificate)) |
 | `…/brew_autoupdate`, `…/brew_autoupdate_launcher`, `…/brew_autoupdate_sudo_gui`, `…/notify-result.sh` | `start` (rewritten every time) | the job's scripts |
 | `…/brew_autoupdate.status` | the app | exit status of the last run |
 | `…/app_management` | the updater | whether the last run that upgraded casks had App Management |
@@ -186,8 +186,8 @@ Every contract that crosses a language boundary, and where each side lives:
 - **`restart`:** `bootout` if loaded, then the same with the saved options.
 - **`stop`:** `launchctl bootout`; files kept. The app notices that the
   launcher has exited and stops the running update.
-- **`delete`:** `bootout`, delete the signing keychain (which also takes it
-  off the search list), then remove the plist, the support directory and the
+- **`delete`:** `bootout`, delete the signing certificate and its key from
+  the login keychain, then remove the plist, the support directory and the
   logs.
 - **`status`:** loaded state (exact `launchctl print`), options from
   `config.json`, run log folder, who signed the app, the last App Management
@@ -631,17 +631,18 @@ trade-offs, research and the goals it touches.
 #### D40. Local signing certificate
 
 - **Status:** Decided.
-  - **Keychain:** a dedicated keychain created by `start`, protected by a
-    random password stored with owner-only permissions in the support
-    directory, set not to lock automatically, and added to the user's keychain
-    search list (`codesign --keychain` alone did not find the identity).
-    Storing the password adds no risk beyond the accepted one: any process
-    running as the user could sign with the key anyway.
+  - **Keychain:** the user's login keychain, so no password is stored
+    anywhere. The certificate is imported with `-T /usr/bin/codesign` but no
+    `set-key-partition-list`, so the first `codesign` use asks for the login
+    password in a macOS dialog; "Always Allow" lets later builds sign without
+    asking. Signing only happens in an interactive `start` or `restart`
+    ([D38](#d38-applying-upgrades)), where the user can answer. Only the
+    login keychain is searched for the identity.
   - **Creation:** `/usr/bin/openssl` (LibreSSL), with an `extendedKeyUsage`
     of `codeSigning`, exported as a `.p12` with legacy algorithms
     (`-macalg sha1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES`); OpenSSL 3's
-    default `.p12` fails to import. Imported with `-T /usr/bin/codesign` and
-    `security set-key-partition-list`.
+    default `.p12` fails to import. The `.p12`'s random password exists only
+    while `start` runs.
   - **Name and validity:** `brew-autoupdate local signing`, valid for 10
     years. `codesign` refuses an expired identity, and a new certificate means
     granting App Management again; validity is never checked after signing.
@@ -651,17 +652,15 @@ trade-offs, research and the goals it touches.
     risk, and how to remove it.
   - **Missing certificate:** `start` creates a new one and says App
     Management must be granted again.
-  - **`delete`:** removes the keychain and its search-list entry, so nothing
-    is left behind; a later `start` creates a new certificate.
-- **Rejected:** the login keychain. Nothing would appear in Keychain Access,
-  but unattended signing would need the user's login password once for
-  `set-key-partition-list`, and possibly an "allow" prompt (untested).
+  - **`delete`:** removes the certificate and its key from the login
+    keychain (`security delete-identity`); a later `start` creates a new one.
+- **Rejected:** a dedicated keychain whose random password was stored in the
+  support directory, so `codesign` could use it unattended. It was the first
+  implementation; the user preferred typing their login password over a
+  password on disk.
 - **Research (verified):** the throwaway keychain in the
   [App Management experiments](#app-management-grants) signed with no prompt.
-- **Note:** signing now only happens in an interactive `start`
-  ([D38](#d38-applying-upgrades)), so the login keychain's possible prompts
-  would matter less than when this was decided; the dedicated keychain stays,
-  because it is verified.
+  The login-keychain prompt is not yet verified.
 
 ### D. Command-line interfaces
 

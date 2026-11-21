@@ -5,9 +5,10 @@ require "system_command"
 require "utils/output"
 
 module Autoupdate
-  # A self-signed code-signing certificate made on this Mac and kept in its own
-  # keychain. macOS ties the app's App Management grant to this certificate,
-  # so the grant survives rebuilds of the app. See ARCHITECTURE.md, D40.
+  # A self-signed code-signing certificate made on this Mac and kept in the
+  # login keychain. macOS ties the app's App Management grant to this
+  # certificate, so the grant survives rebuilds of the app. See
+  # ARCHITECTURE.md, D40.
   module Signing
     extend SystemCommand::Mixin
     extend Utils::Output::Mixin
@@ -19,32 +20,29 @@ module Autoupdate
     # App Management again.
     VALIDITY_DAYS = 3650
 
-    def keychain
-      Autoupdate::Core.location/"signing.keychain-db"
-    end
-
-    def password_file
-      Autoupdate::Core.location/"signing.password"
-    end
-
     # The certificate's SHA-1, which `codesign` accepts as the identity.
-    # Creates the keychain and certificate first if they do not exist.
+    # Creates the certificate first if the login keychain does not have one.
     def identity
-      create unless keychain.exist?
-
-      security "unlock-keychain", "-p", password_file.read, keychain
-      add_to_search_list
-      output = security("find-certificate", "-c", NAME, "-Z", keychain).stdout
-      output[/^SHA-1 hash: (\h{40})$/, 1] || odie("No #{NAME} certificate in #{keychain}.")
+      create unless existing
+      existing || odie("No #{NAME} certificate in #{login_keychain}.")
     end
 
     def delete
-      security "delete-keychain", keychain if keychain.exist?
+      security "delete-identity", "-c", NAME, login_keychain if existing
+    end
+
+    def existing
+      output = security("find-identity", "-p", "codesigning", login_keychain).stdout
+      output[/^\s*\d+\) (\h{40}) "#{Regexp.escape(NAME)}"/o, 1]
+    end
+
+    def login_keychain
+      security("login-keychain").stdout.strip.delete('"')
     end
 
     def create
+      # Only protects the temporary `.p12` file, which is deleted afterwards.
       password = SecureRandom.hex(32)
-      File.open(password_file, File::WRONLY | File::CREAT | File::TRUNC, 0600) { |file| file.write(password) }
 
       Dir.mktmpdir do |dir|
         dir = Pathname(dir)
@@ -64,32 +62,18 @@ module Autoupdate
           "-passout", "pass:#{password}",
           "-macalg", "sha1", "-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES"
         ]
-
-        security "create-keychain", "-p", password, keychain
-        # Without options, the keychain never locks itself while logged in.
-        security "set-keychain-settings", keychain
-        security "import", dir/"identity.p12", "-k", keychain, "-P", password, "-T", "/usr/bin/codesign"
-        # Lets `codesign` use the key without asking for the keychain password.
-        security "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", password, keychain
+        security "import", dir/"identity.p12", "-k", login_keychain, "-P", password, "-T", "/usr/bin/codesign"
       end
 
       opoo <<~EOS
-        Created a code-signing certificate for the app `brew autoupdate` builds, in:
-          #{keychain}
-        The keychain's password is in:
-          #{password_file}
-        The keychain is on your keychain search list, so `codesign` can use it
-        unattended, and so can any program running as you.
+        Created a code-signing certificate named "#{NAME}"
+        in your login keychain, for the app `brew autoupdate` builds.
+        When `codesign` first uses it, macOS asks for your login password;
+        choose "Always Allow" to sign later builds without asking again.
+        After that, any program running as you can sign code with it
+        through `codesign`.
         `brew autoupdate delete` removes it.
       EOS
-    end
-
-    # `codesign` only finds identities in keychains on the search list.
-    def add_to_search_list
-      keychains = security("list-keychains", "-d", "user").stdout.lines.map { |line| line.strip.delete('"') }
-      return if keychains.include?(keychain.to_s)
-
-      security "list-keychains", "-d", "user", "-s", *keychains, keychain
     end
 
     def security(*args)

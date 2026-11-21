@@ -57,9 +57,11 @@ at that specific time instead of relative to when the command was run.
 
 `start` needs the Xcode Command Line Tools to build the app, which takes about
 a minute. The first time, it also creates a code-signing certificate for the
-app in a keychain of its own, and says so. The certificate stays the same
-when the app is rebuilt, so macOS keeps the app's permissions. Any program
-running as you can sign code with it; `brew autoupdate delete` removes it.
+app in your login keychain, and says so; macOS then asks for your login
+password so `codesign` can use it (choose "Always Allow"). The certificate
+stays the same when the app is rebuilt, so macOS keeps the app's permissions.
+Any program running as you can sign code with it;
+`brew autoupdate delete` removes it.
 
 ### Upgrading apps in place (App Management)
 
