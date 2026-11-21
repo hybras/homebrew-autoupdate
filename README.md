@@ -8,8 +8,9 @@ default) until explicitly told to stop, utilising `launchd`.
 `brew upgrade` and `brew cleanup` can also be handled automatically, but
 are optional flags.
 
-Notifications are enabled by default using a code-signed, universal macOS app.
-Pass `--notify-on-error` to suppress successful-run notifications, or
+Scheduled runs go through a small macOS app that `brew autoupdate start`
+builds from source and signs on your Mac. It also shows notifications, which
+are on by default. Pass `--notify-on-error` to suppress successful-run notifications, or
 `--no-notify` to disable notifications entirely.
 
 ![A comic highlighting humanity's habit of skipping important updates](https://imgs.xkcd.com/comics/update.png)
@@ -26,10 +27,13 @@ brew trust --command hybras/autoupdate/autoupdate
 This is a personal development fork of
 [DomT4/homebrew-autoupdate](https://github.com/DomT4/homebrew-autoupdate). It
 is not published for others to use: its helper app is not notarized, and is
-meant to be built from source on your own Mac (see
-[ARCHITECTURE](ARCHITECTURE.md#d07-notarization)). Only one tap can provide `brew autoupdate`, so if you have DomT4's tap
-installed, remove it first with `brew untap domt4/autoupdate`. An existing
-schedule keeps working: this tap manages the same launch agent.
+built from source on your own Mac (see
+[ARCHITECTURE](ARCHITECTURE.md#d07-notarization)).
+
+Only one tap can provide `brew autoupdate`. If you used DomT4's tap, run
+`brew autoupdate delete` with it first, then `brew untap domt4/autoupdate`:
+this fork uses its own names (`com.github.hybras.homebrew-autoupdate`) and
+cannot manage DomT4's launch agent.
 
 Homebrew is moving towards requiring explicit trust before loading commands
 from non-official taps. Command-scoped trust is recommended here because it
@@ -51,17 +55,24 @@ The interval defaults to 24 hours and accepts seconds or a short duration such
 as `30m`, `12h`, or `1d`, or a 24-hour clock time such as `00:00` to run daily
 at that specific time instead of relative to when the command was run.
 
+`start` needs the Xcode Command Line Tools to build the app, which takes about
+a minute. The first time, it also creates a code-signing certificate for the
+app in a keychain of its own, and says so. The certificate stays the same
+when the app is rebuilt, so macOS keeps the app's permissions. Any program
+running as you can sign code with it; `brew autoupdate delete` removes it.
+
 ### Upgrading apps in place (App Management)
 
 When `--upgrade` includes casks, macOS only lets Homebrew update an app in
 place (keeping its Dock position and settings) if the upgrade runs with App
-Management permission. Scheduled runs go through the `brew-autoupdate` helper
-app, so the permission belongs to that app and survives Homebrew's Ruby
-upgrades.
+Management permission. Scheduled runs go through the `brew-autoupdate` app,
+so the permission belongs to that app and survives Homebrew's Ruby upgrades
+and the app's own rebuilds.
 
 1. Open System Settings > Privacy & Security > App Management.
 2. Click **+**, press Cmd+Shift+G and enter the app's path, shown at the end
-   of `brew autoupdate start --upgrade`.
+   of `brew autoupdate start --upgrade`
+   (`~/Library/Application Support/com.github.hybras.homebrew-autoupdate/brew-autoupdate.app`).
 3. Make sure the switch is on.
 
 The app may not appear in that list, or may not stay visible, even when the
@@ -69,10 +80,9 @@ permission is in effect, so don't rely on the list. Allowing the "prevented
 from modifying apps" notification alone does not grant it either. Without the
 permission, Homebrew still upgrades the app, but by reinstalling it.
 
-`brew autoupdate status` shows whether your setup runs through the app.
-Setups started with older versions switch over after `brew autoupdate stop`
-and `brew autoupdate start`. Manual `brew upgrade` runs keep using your
-terminal's permission.
+After each scheduled run that upgrades casks, `brew autoupdate status` shows
+whether that run had the permission. Manual `brew upgrade` runs keep using
+your terminal's permission.
 
 ## Example
 
@@ -145,11 +155,15 @@ Common start options:
   --notify-on-error shows notifications only for failed runs.
   --no-notify disables notifications.
 
+After this tap's source changes, run brew autoupdate restart so the job uses
+the new version; status and the job's notifications remind you.
+
 Examples:
   brew autoupdate start
   brew autoupdate start 12h --upgrade --cleanup --immediate
   brew autoupdate start 1d --upgrade --only=wget,node,firefox
   brew autoupdate start 00:00 --upgrade --cleanup
+  brew autoupdate restart
   brew autoupdate logs --lines=50
   brew autoupdate logs --follow
 
@@ -161,14 +175,16 @@ Subcommands:
     Start autoupdating in the background.
   stop:
     Stop autoupdating while retaining the launch agent, configuration, and logs.
+  restart:
+    Start autoupdating again with the saved options.
   delete:
-    Stop autoupdating and delete its launch agent, configuration, and logs.
+    Stop autoupdating and delete everything start created: the launch agent,
   status:
     Show whether autoupdate is running and describe its installed configuration.
+  logs:
+    Show the output of the latest autoupdate run.
   version:
     Show this tool's current version and a short changelog.
-  logs:
-    Show output from autoupdate runs.
 
   -d, --debug                      Display any debugging information.
   -q, --quiet                      Make some output more quiet.
@@ -208,7 +224,7 @@ the given ones replace them.
 
 From tap: hybras/autoupdate
 Usage: brew autoupdate logs [options]:
-    Show output from autoupdate runs.
+    Show the output of the latest autoupdate run.
 
   -d, --debug                      Display any debugging information.
   -q, --quiet                      Make some output more quiet.
@@ -221,7 +237,8 @@ Usage: brew autoupdate logs [options]:
 
 <!-- HELP-COMMAND-OUTPUT:END -->
 
-**Logs of the performed operations can be found at:** `~/Library/Logs/com.github.domt4.homebrew-autoupdate`
+**Each run's log is kept in:** `~/Library/Logs/com.github.hybras.homebrew-autoupdate/runs`
+(the newest 30). `brew autoupdate logs` shows the latest one.
 
 ## This vs `brew`'s built-in autoupdate mechanism
 
@@ -250,44 +267,46 @@ autoupdate mechanism.
 
 ## How it works
 
-`brew autoupdate start` saves your options and writes a launch agent plus a few
-small shell scripts to
-`~/Library/Application Support/com.github.domt4.homebrew-autoupdate`. On
-schedule, `launchd` runs a launcher script, which opens the helper app; the
-app runs the updater script, which runs `brew update`, `upgrade` and `cleanup`
-as configured, then reports the result as a notification.
+`brew autoupdate start` saves your options, builds and signs the app, and
+writes a launch agent plus a few small shell scripts. Everything a job runs
+lives in `~/Library/Application Support/com.github.hybras.homebrew-autoupdate`,
+so updating this tap does not change a running job. On schedule, `launchd`
+runs a launcher script, which opens the app; the app runs the updater script,
+which runs `brew update`, `upgrade` and `cleanup` as configured, then reports
+the result as a notification listing what was upgraded.
 [ARCHITECTURE](ARCHITECTURE.md) explains the design and the decisions behind
 it.
 
-A running job keeps the scripts it was started with. Whenever this tap's
-source changes, whether through `brew update` or your own edits, restart the
-job so it picks the changes up:
+A job keeps the files it was started with. Whenever this tap's source
+changes, whether through `brew update` or your own edits, restart the job so
+it picks the changes up:
 
 ```sh
-brew autoupdate stop
-brew autoupdate start
+brew autoupdate restart
 ```
 
-`start` with no options reuses the saved ones. A reminder that a restart is
-due is planned for the job's notification and `brew autoupdate status`, but
-does not exist yet ([details](ARCHITECTURE.md#d38-applying-upgrades)).
+`restart` reuses your saved options and keeps the app's permissions. When the
+tap's commit no longer matches the job's, the job's notifications and
+`brew autoupdate status` remind you
+([details](ARCHITECTURE.md#d38-applying-upgrades)). Uncommitted edits do not
+trigger the reminder.
 
 ## Verifying what runs
 
 Everything a scheduled run executes can be read: the scripts in the folder
-above, the Ruby code in this tap, and the helper app's source in
-`app/BrewAutoupdate.swift`. You can rebuild the app yourself with
-`CODESIGN_IDENTITY=- app/build.sh <output.app>`. Builds are reproducible when
-the Swift and SDK versions are the same (see
-[ARCHITECTURE](ARCHITECTURE.md#reproducible-builds)).
+above, the Ruby code in this tap, and the app's source in
+`app/BrewAutoupdate.swift`, which `start` builds on your Mac. No prebuilt
+binary is involved. Builds are reproducible when the Swift and SDK versions
+are the same (see [ARCHITECTURE](ARCHITECTURE.md#reproducible-builds)).
 
 ## Troubleshooting
 
 - **`brew autoupdate` is refused as untrusted:** run the `brew trust` command
   from [Installing this command](#installing-this-command).
-- **`status` says "Runs via: updater script (the installed brew-autoupdate.app
-  cannot run updates)":** the committed app is older than this code and
-  hasn't been rebuilt yet; updates still run, but without the helper app.
+- **`start` fails while building the app:** install the Command Line Tools
+  with `xcode-select --install`, then run `brew autoupdate start` again.
+- **`status` says App Management was "not granted":** grant it as described
+  in [Upgrading apps in place](#upgrading-apps-in-place-app-management).
 - **Apps are reinstalled instead of upgraded in place:** grant App Management
   as described in [Upgrading apps in place](#upgrading-apps-in-place-app-management).
 - **No notifications:** check System Settings > Notifications for
@@ -297,14 +316,13 @@ the Swift and SDK versions are the same (see
   ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255)). This is
   not handled yet; updates still run, so check `brew autoupdate logs`
   instead ([known issue](ARCHITECTURE.md#macos-27-may-refuse-notifications)).
-- **"This setup was created by an older version":** run
-  `brew autoupdate delete`, then `brew autoupdate start` with your options.
+- **`status` says "This tap has changed since the job started":** run
+  `brew autoupdate restart`.
 
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md) for setup, testing and building the app,
-and [ARCHITECTURE](ARCHITECTURE.md) for open design decisions. Issues and pull
-requests are welcome.
+and [ARCHITECTURE](ARCHITECTURE.md) for the design decisions.
 
 ## History
 

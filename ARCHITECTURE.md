@@ -37,22 +37,21 @@ Conventions used throughout:
 
 ## Goals
 
-- **G1. Subcommands register themselves.** `cmd/autoupdate.rb` should not
-  list subcommands, their options and their dispatch by hand. Today it has a
-  `SUBCOMMANDS` constant, one `subcommand` block per subcommand and a `case`
-  statement. Subcommand logic stays in `lib/`. See [D19](#d19-ruby-module-boundaries)
-  and [D21](#d21-user-cli).
-- **G2. The Ruby code is as clean and short as possible.** It is about 1,090
-  lines today; the largest files are `lib/autoupdate/start.rb` and
-  `cmd/autoupdate.rb`.
-- **G3. No unnecessary duplication between Ruby, Swift and shell.** Today
-  these are repeated across languages: the launchd label and support
-  directory; the names `brew_autoupdate` and `brew_autoupdate.status`;
-  `run-updater` and `BrewAutoupdateCapabilities`; and the capability check
-  itself. See [D15](#d15-constants-shared-across-languages).
-- **G4. Compatibility with DomT4's version is a non-goal.** Legacy setups, the
-  `notifier/notify.sh` forwarder and the hidden `--start`-style switches can be
-  removed, and the label, bundle ID and paths can change.
+- **G1. Subcommands register themselves.** Each subcommand is a
+  `Homebrew::AbstractSubcommand` in its own file in `lib/autoupdate/`, so
+  `cmd/autoupdate.rb` does not list subcommands, their options or their
+  dispatch. See [D19](#d19-ruby-module-boundaries) and [D21](#d21-user-cli).
+- **G2. The Ruby code is as clean and short as possible.** It is about 1,240
+  lines, after adding local signing, building, restart reminders and per-run
+  logs; the largest files are `lib/autoupdate/setup.rb` and
+  `lib/autoupdate/script.rb`.
+- **G3. No unnecessary duplication between Ruby, Swift and shell.** The
+  support directory, the names `brew_autoupdate` and `brew_autoupdate.status`,
+  and the bundle ID are still repeated across languages, checked by a test.
+  See [D15](#d15-constants-shared-across-languages).
+- **G4. Compatibility with DomT4's version is a non-goal.** The fork has its
+  own label, bundle ID and paths, and has dropped legacy setups, the
+  `notifier/notify.sh` forwarder and the hidden `--start`-style switches.
 - **G5. Users can verify everything that runs without trusting the
   developers.** Every script a job runs is readable, and every executable can
   be rebuilt from source. See [D10](#d10-provenance-and-verification).
@@ -97,48 +96,51 @@ Conventions used throughout:
 
 ## Overview
 
-`brew autoupdate start` writes everything a job needs and loads a launch
-agent. Each scheduled run then goes through the helper app, so that macOS
-checks the app's permissions rather than those of Homebrew's portable Ruby
+`brew autoupdate start` builds and signs the app, writes everything a job
+needs into the job's own folder and loads a launch agent. Each scheduled run
+then goes through the app, so that macOS checks the app's permissions rather
+than those of Homebrew's portable Ruby
 ([#163](https://github.com/DomT4/homebrew-autoupdate/issues/163)).
 
 ```mermaid
 flowchart TD
-  subgraph management["Management time: brew autoupdate start"]
-    cmd["cmd/autoupdate.rb + lib/autoupdate"] --> config["config.json"]
-    cmd --> scripts["brew_autoupdate, brew_autoupdate_launcher, brew_autoupdate_sudo_gui"]
+  subgraph management["Management time: brew autoupdate start or restart"]
+    cmd["cmd/autoupdate.rb + lib/autoupdate"] --> config["config.json (options, tap commit)"]
+    cmd -->|"local certificate"| app["brew-autoupdate.app (built from app/)"]
+    cmd --> scripts["brew_autoupdate, brew_autoupdate_launcher, brew_autoupdate_sudo_gui, notify-result.sh"]
     cmd --> plist["LaunchAgents plist"]
     plist -->|"launchctl bootstrap"| launchd
   end
   subgraph run["Run time: each scheduled run"]
     launchd -->|"interval or time"| launcher["brew_autoupdate_launcher (sh)"]
-    launcher -->|"open -W -g -n … --args run-updater"| app["brew-autoupdate.app (Swift)"]
-    launcher -.->|"app lacks capability"| updater
-    app -->|"taskpolicy -b /bin/sh"| updater["brew_autoupdate (sh)"]
-    updater --> brew["brew update / upgrade / cleanup"]
-    updater --> notify["app/notify-result.sh"]
-    notify -->|"brew-autoupdate notify"| app2["brew-autoupdate.app"]
+    launcher -->|"open -W -g -n … --args run-updater"| runapp["brew-autoupdate.app (Swift)"]
+    launcher -.->|"app cannot be opened"| updater
+    runapp -->|"taskpolicy -b /bin/sh"| updater["brew_autoupdate (sh)"]
+    updater --> brew["brew update / outdated / upgrade / cleanup"]
+    updater --> runlog["runs/<time>.log"]
+    updater --> notify["notify-result.sh"]
+    notify -->|"brew-autoupdate notify"| notifyapp["brew-autoupdate.app"]
   end
 ```
 
 ## Components and boundaries
 
-The last column matters for G6: anything that lives in the tap changes as soon
-as `brew update` pulls a new version, even for jobs that are already
-registered.
+The last column matters for G6: anything a job runs lives in the support
+directory, written by `start` or `restart`, so a `brew update` that changes
+the tap does not change a registered job.
 
 | Component | Language | Runs when | Called by | Lives in |
 | --- | --- | --- | --- | --- |
 | `cmd/autoupdate.rb` | Ruby (`AbstractCommand`) | the user runs `brew autoupdate` | Homebrew | tap |
-| `lib/autoupdate/*.rb`, Homebrew-dependent (`start`, `status`, `launchd`, `stop`, `delete`, `logs`, `version`, `cleanup`) | Ruby | management time | `cmd/autoupdate.rb` | tap |
-| `lib/autoupdate/*.rb`, dependency-free generators (`config`, `script`, `launch_agent`, `launcher`, `interval`) | Ruby | management time; loaded directly by tests | the modules above | tap |
+| `lib/autoupdate/{start,stop,restart,delete,status,logs,version}.rb` | Ruby (`AbstractSubcommand`) | management time | `cmd/autoupdate.rb` | tap |
+| `lib/autoupdate/{setup,signing,launchd}.rb` | Ruby, needs Homebrew | management time | the subcommands | tap |
+| `lib/autoupdate/{config,script,launch_agent,launcher,interval,notify,core}.rb` | Ruby, dependency-free | management time; loaded directly by tests | the modules above | tap |
+| `app/build.sh` | shell | when `start` needs a new app, and in CI | `Autoupdate::Setup` | tap |
+| `brew-autoupdate.app` | Swift (`app/BrewAutoupdate.swift`) | each run (`run-updater`) and for notifications (`notify`) | the launcher and `notify-result.sh` | support directory |
 | `brew_autoupdate` (updater) | generated shell | each run | the app, or the launcher directly | support directory |
 | `brew_autoupdate_launcher` | generated shell | each run | launchd | support directory |
 | `brew_autoupdate_sudo_gui` | generated shell | when a cask upgrade needs `sudo` | `sudo -A` | support directory |
-| `app/notify-result.sh` | static shell | end of each run | the updater | **tap** |
-| `notifier/notify.sh` | static shell (forwarder) | end of runs from older updaters | legacy updater scripts | **tap** |
-| `app/brew-autoupdate.app` | Swift (`app/BrewAutoupdate.swift`) | each run (`run-updater`) and for notifications (`notify`) | the launcher and `notify-result.sh` | **tap** |
-| `app/build.sh` | shell | when the app is rebuilt | maintainers and CI | tap |
+| `notify-result.sh` | static shell, copied from `app/` | end of each run | the updater | support directory |
 
 ## Internal interfaces
 
@@ -146,50 +148,60 @@ Every contract that crosses a language boundary, and where each side lives:
 
 | Interface | Producer | Consumer | Contract |
 | --- | --- | --- | --- |
-| App capability | `app/build.sh` writes `BrewAutoupdateCapabilities = ["run-updater-1"]` into Info.plist | `lib/autoupdate/launcher.rb` (Ruby check for `status`) and the generated launcher (shell check) | the launcher only calls `run-updater` if the app lists `run-updater-1`; a changed argument list gets a new name |
-| `run-updater` | the launcher | the app | `brew-autoupdate run-updater <log> <launcher-pid>`; the app runs the fixed script `~/Library/Application Support/com.github.domt4.homebrew-autoupdate/brew_autoupdate`, appends to `<log>`, and stops the update when `<launcher-pid>` exits |
+| `run-updater` | the launcher | the app | `brew-autoupdate run-updater <log> <launcher-pid>`; the app runs the fixed script `~/Library/Application Support/com.github.hybras.homebrew-autoupdate/brew_autoupdate` with `BREW_AUTOUPDATE_RUN_BY_APP=1`, appends to `<log>`, and stops the update when `<launcher-pid>` exits. Both sides are built together by `start` |
 | Exit status | the app | the launcher | written to `brew_autoupdate.status`, because `open -W` does not pass the app's exit status on |
-| `notify` | `app/notify-result.sh` | the app | `brew-autoupdate notify <title> <subtitle> <message>` |
-| Run result | the updater | `app/notify-result.sh` | `notify-result.sh <status> <run-log> <always\|error\|never> <app-path>` |
-| Saved options | `start` | `start` (resume), `status` | `config.json`, `"version": 1` |
-| Source hash | `app/build.sh` writes `BrewAutoupdateSourcesSHA256` | `test/app_test.rb` in CI | the committed app must match `BrewAutoupdate.swift` + `build.sh` |
-| Shared names | Ruby (`core.rb`, `launcher.rb`), Swift, `build.sh` | all | label, support directory, script and status file names, bundle ID (duplicated: G3, [D15](#d15-constants-shared-across-languages)) |
+| `notify` | `notify-result.sh` | the app | `brew-autoupdate notify <title> <subtitle> <message>` |
+| Run result | the updater | `notify-result.sh` | `notify-result.sh <status> <run-log> <always\|error\|never> <app-path> <reminder>`; the outdated packages are in `<run-log>` with `.outdated.json` in place of `.log` |
+| Saved options | `start` | `start` (resume), `restart`, `status` | `config.json`, `"version": 2`, including the tap's commit |
+| App Management | the updater | `status` | `app_management` in the support directory: `granted`, `not granted` or `not checked: …`, with the time |
+| Source hash | `app/build.sh` writes `BrewAutoupdateSourcesSHA256` | `Autoupdate::Setup.build_app` | `start` skips rebuilding when it matches `BrewAutoupdate.swift` + `build.sh` and the app is signed with the current certificate |
+| Shared names | Ruby (`core.rb`), Swift, `build.sh` | all | support directory, script and status file names, bundle ID (duplicated and checked by `test/constants_test.rb`: G3, [D15](#d15-constants-shared-across-languages)) |
 
 ## Files on disk
 
+`<label>` is `com.github.hybras.homebrew-autoupdate`.
+
 | Path | Written by | Purpose |
 | --- | --- | --- |
-| `~/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist` | `start` | schedule, logs, runs the launcher |
-| `~/Library/Application Support/com.github.domt4.homebrew-autoupdate/config.json` | `start` | saved options and captured environment |
-| `…/brew_autoupdate`, `…/brew_autoupdate_launcher`, `…/brew_autoupdate_sudo_gui` | `start` (rewritten every time) | the job's scripts |
+| `~/Library/LaunchAgents/<label>.plist` | `start` | schedule, logs, runs the launcher |
+| `~/Library/Application Support/<label>/config.json` | `start` | saved options, captured environment and the tap's commit |
+| `…/brew-autoupdate.app` | `start` (rebuilt when its source changes) | the app, signed with the local certificate |
+| `…/signing.keychain-db`, `…/signing.password` | `start` (once) | the local signing certificate ([D40](#d40-local-signing-certificate)) |
+| `…/brew_autoupdate`, `…/brew_autoupdate_launcher`, `…/brew_autoupdate_sudo_gui`, `…/notify-result.sh` | `start` (rewritten every time) | the job's scripts |
 | `…/brew_autoupdate.status` | the app | exit status of the last run |
-| `~/Library/Logs/com.github.domt4.homebrew-autoupdate/com.github.domt4.homebrew-autoupdate.out` | launchd and the app | one shared, append-only log (see [D24](#d24-logging)) |
-| The tap (`$(brew --repo hybras/autoupdate)`) | `brew update` | Ruby, `app/`, `notifier/` |
+| `…/app_management` | the updater | whether the last run that upgraded casks had App Management |
+| `~/Library/Logs/<label>/runs/<time>.log` and `<time>.outdated.json` | the updater | each run's output and the packages it upgraded; the newest 30 are kept ([D24](#d24-logging)) |
+| `~/Library/Logs/<label>/<label>.out` | launchd and the app | one line per run, plus errors outside a run |
+| The tap (`$(brew --repo hybras/autoupdate)`) | `brew update` | Ruby and `app/` sources; jobs only use them after a restart |
 | TCC database (system-managed) | macOS | App Management and notification grants |
 
 ## Lifecycles
 
-- **`start` (new):** validate options → save `config.json` → write the three
-  scripts → write the plist → `launchctl bootstrap gui/<uid>`.
+- **`start` (new):** validate options → create the signing certificate if
+  needed → save `config.json` with the tap's commit → build and sign the app
+  unless it is current → write the scripts → write the plist →
+  `launchctl bootstrap gui/<uid>`.
 - **`start` (resume after `stop`, no options):** reuse `config.json`, then
-  rewrite all scripts from it.
-- **`start` (setup made before options were saved, no options):** keep the old
-  updater script as-is and warn (G4 allows dropping this).
+  do the same.
+- **`restart`:** `bootout` if loaded, then the same with the saved options.
 - **`stop`:** `launchctl bootout`; files kept. The app notices that the
   launcher has exited and stops the running update.
-- **`delete`:** `bootout`, then remove the plist, the support directory and
-  the logs.
+- **`delete`:** `bootout`, delete the signing keychain (which also takes it
+  off the search list), then remove the plist, the support directory and the
+  logs.
 - **`status`:** loaded state (exact `launchctl print`), options from
-  `config.json`, launch mode, log path, 90-day reminder.
+  `config.json`, run log folder, who signed the app, the last App Management
+  result, and the restart reminder when the tap's commit has changed.
 - **A scheduled run:** launchd → launcher → `open` → app →
-  `taskpolicy -b /bin/sh brew_autoupdate` → `brew update && brew upgrade … &&
-  brew cleanup` → `notify-result.sh` → app `notify`.
-- **A tap upgrade during a run (today, violates G6):** the run's first step,
-  `brew update`, can replace `app/` and `notify-result.sh` in the tap. The old
-  updater script then calls the new `notify-result.sh` and the new app.
+  `taskpolicy -b /bin/sh brew_autoupdate` → App Management check →
+  `brew update && brew outdated && brew upgrade … && brew cleanup` → restart
+  check → `notify-result.sh` → app `notify` → old run logs pruned.
+- **A tap upgrade during a run:** the run's `brew update` may change the tap,
+  but the job only runs files in its support directory, so the run is
+  unaffected; it reminds the user to restart.
 - **Failure paths:** the command chain stops at the first failure; the status
-  is reported in the log and a notification; if the app cannot be opened, the
-  launcher runs the updater directly.
+  is reported in the run's log and a notification; if the app cannot be
+  opened, the launcher runs the updater directly.
 
 ## Decisions
 
@@ -236,11 +248,10 @@ trade-offs, research and the goals it touches.
 #### D03. How the app reaches users
 
 - **Status:** Decided: `start` builds the app from source on the user's Mac
-  and signs it there ([D39](#d39-signing-modes)). Current: a signed binary
-  committed in git and updated by `brew update`; it is to be removed, leaving
-  only text in the repository.
+  and signs it there ([D39](#d39-signing-modes)). The repository holds only
+  source; the previously committed binary is gone.
 - **Options:**
-  - a binary committed in git (current; rejected by G10: an unnotarized
+  - a binary committed in git (previous; rejected by G10: an unnotarized
     binary delivered through git escapes quarantine rather than passing
     notarization)
   - built on the user's machine from source by `start` (decided)
@@ -299,7 +310,7 @@ trade-offs, research and the goals it touches.
 - **Status:** Decided by [D37](#d37-isolating-jobs-from-tap-upgrades): `start`
   builds the app from the same tap commit as the scripts it writes, so they
   cannot drift apart.
-- **Options:** same commit (current) / `start` installs or checks a cask /
+- **Options:** same commit (previous) / `start` installs or checks a cask /
   version negotiation through capabilities.
 
 #### D05. Fixing it in Homebrew instead
@@ -370,8 +381,9 @@ trade-offs, research and the goals it touches.
 - **Status:** Decided: users build from source, so there is no binary to
   verify (G5, G10).
 - **Options:**
-  - the source-hash guard (current, ⚙): CI checks that the committed app was
-    built from the current sources; it goes once the committed app is removed
+  - the source-hash guard (previous, ⚙): CI checked that the committed app was
+    built from the current sources. Removed with that app; `start` now uses
+    the same hash to skip needless rebuilds
   - build attestation in CI (`actions/attest-build-provenance`, checked with
     `gh attestation verify`) ⚙; not needed while nothing is distributed
   - reproducible builds plus a `brew autoupdate verify` command ⚙
@@ -474,7 +486,7 @@ trade-offs, research and the goals it touches.
   Caveat: the list is what was outdated before the upgrade; it equals what was
   upgraded only because the run stops at the first failure
   ([D26](#d26-failure-semantics)).
-- **Options:** text parsing (current) / structured data from
+- **Options:** text parsing (previous) / structured data from
   `brew outdated --json=v2` (`name`, `installed_versions`, `current_version`,
   `pinned`) / summarizing in Swift.
 
@@ -511,9 +523,9 @@ trade-offs, research and the goals it touches.
   the scripts, `notify-result.sh` and `brew-autoupdate.app` there, so nothing
   a job runs comes from the tap. The app is built in a temporary directory
   and renamed into place only after signing and verification succeed, as
-  `app/build.sh` already does. Current: jobs use `app/` in the tap (violates G6).
+  `app/build.sh` already does.
 - **Options:**
-  - jobs use files in the tap (current; violates G6)
+  - jobs use files in the tap (previous; violates G6)
   - one snapshot in the support directory (decided)
   - versioned snapshot directories with an atomic `current` symlink and the
     previous one kept for rollback (the Nix pattern) ⚙; not needed (YAGNI)
@@ -600,10 +612,16 @@ trade-offs, research and the goals it touches.
   - Grants survive a certificate's expiry; an expired certificate only stops
     new builds from being signed ([details](#certificate-expiry)).
 - **Requirements:**
-  - `status` must show the signing identity, and whether App Management is
-    really granted, using Homebrew's write check
-    (`Cask::Quarantine.app_management_permissions_granted?`). The System
-    Settings list proved unreliable ([details](#system-settings-is-not-reliable)).
+  - `status` shows who signed the app, and whether App Management was
+    granted at the last run that upgraded casks. The System Settings list
+    proved unreliable ([details](#system-settings-is-not-reliable)), so each
+    such run does what Homebrew's
+    `Cask::Quarantine.app_management_permissions_granted?` does: it writes a
+    file into an app bundle it owns, in `~/Applications` or `/Applications`,
+    and removes it. Only a run started by the app records a result, since
+    macOS judges the process responsible for the write: the same check from
+    `status` would test the terminal's permission instead, and prompt to
+    grant App Management to the terminal.
   - Signing happens in `start`, outside Homebrew's sandbox; a cask cannot
     reach the keychain ([D03b](#d03b-a-cask-that-builds-or-assembles-the-app)).
   - The local certificate's risk (any process running as the user can sign
@@ -728,7 +746,10 @@ trade-offs, research and the goals it touches.
     same exposure.
   - Any process running as the user can sign code with the local
     certificate ([D40](#d40-local-signing-certificate)).
-  - Both are accepted because only the maintainer uses this fork (G10).
+  - Each run that upgrades casks briefly writes a file into an app the user
+    owns, to record App Management ([D39](#d39-signing-modes)), as Homebrew
+    does before each cask upgrade.
+  - All are accepted because only the maintainer uses this fork (G10).
 
 #### D29. Notifications
 
@@ -756,8 +777,7 @@ trade-offs, research and the goals it touches.
 
 - **Status:** Decided: rename `com.github.domt4.homebrew-autoupdate` to
   `com.github.hybras.homebrew-autoupdate` in the launchd label, support and
-  log directories, and the bundle ID (`….autoupdater`). Current: shared with
-  upstream.
+  log directories, and the bundle ID (`….autoupdater`).
 - **Why now:** App Management has to be granted again anyway for the new
   certificate ([D40](#d40-local-signing-certificate)). The rename resets
   notification permission once.
@@ -767,8 +787,8 @@ trade-offs, research and the goals it touches.
 #### D33. Minimum macOS version
 
 - **Status:** Decided: macOS 15, matching Homebrew's oldest supported version
-  (`HOMEBREW_MACOS_OLDEST_SUPPORTED`, `brew.sh:362`). Current: the app
-  declares 11.
+  (`HOMEBREW_MACOS_OLDEST_SUPPORTED`, `brew.sh:362`). The app declares it
+  and is built for it.
 
 #### D36. Minimum Homebrew version
 
@@ -966,12 +986,16 @@ components.
 
 ## This fork compared with upstream
 
-This fork is 20 commits ahead of `DomT4/homebrew-autoupdate`.
+This fork is about 40 commits ahead of `DomT4/homebrew-autoupdate`.
 
 **Better:**
 
 - Scheduled runs go through the app, so App Management survives portable Ruby
-  upgrades (#163, #253).
+  upgrades (#163, #253), and `status` shows whether the last run had it.
+- The app is built from source and signed on the user's Mac with a local
+  certificate, so no binary is distributed and the grant survives rebuilds.
+- Jobs run only files in their own folder, so tap upgrades never change a
+  running job; a reminder says when `brew autoupdate restart` is due.
 - Bugs fixed:
   - a substring match on `launchctl list` that made a stopped setup look
     running while the app ran
@@ -979,20 +1003,20 @@ This fork is 20 commits ahead of `DomT4/homebrew-autoupdate`.
   - the password prompt's missing icon
   - notifications breaking for forks tapped under another name
 - Options are saved, and every `start` regenerates the scripts.
-- Tests run the generated scripts against a fake `brew`.
-- CI builds the real app bundle, runs every test file, and runs Homebrew's
-  standard tap checks.
-- The contract between the launcher and the app is versioned.
+- Notifications list each upgraded package with its versions.
+- One log file per run, keeping the newest 30, instead of one ever-growing
+  log.
+- Subcommands register themselves, and `restart` exists.
+- Tests run the generated scripts against a fake `brew`; CI builds the real
+  app bundle, runs every test file, and runs Homebrew's standard tap checks.
 
 **Worse or risky:**
 
-- The fork's committed app is out of date, so notifications and App
-  Management through the app need a local build first; building in `start`
-  (D03) is not implemented yet.
-- Jobs still use files in the tap (G6 is not met); upstream has the same
-  problem.
-- The committed binary cannot be verified against its sources (G5) until it
-  is removed.
+- `start` needs the Command Line Tools and takes about a minute when it has
+  to build the app.
+- The local signing key can be used by any process running as the user.
+- The app is not notarized; macOS 27 may refuse its notifications
+  ([known issue](#macos-27-may-refuse-notifications)).
 - Testing so far covers macOS 15 only, on one Intel and one Apple silicon Mac.
 
 ## Merging upstream or replacing it
@@ -1008,10 +1032,9 @@ changes:
     `brew trust`.
   - Homebrew has no migration for commands (`tap_migrations.json` covers only
     formulae and casks), and the two taps cannot be installed together.
-  - The shared launchd label lets this tap manage existing jobs, until the
-    rename in [D32](#d32-label-bundle-id-and-paths).
-  - A different signing identity means App Management is granted again;
-    notification permission carries over while the bundle ID stays the same.
+  - This fork's label differs ([D32](#d32-label-bundle-id-and-paths)), so
+    users delete their upstream job before switching and grant App
+    Management and notification permission again.
 
 ## References
 
