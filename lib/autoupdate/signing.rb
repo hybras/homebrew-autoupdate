@@ -68,10 +68,9 @@ module Autoupdate
       opoo <<~EOS
         Created a code-signing certificate named "#{NAME}"
         in your login keychain, for the app `brew autoupdate` builds.
-        When `codesign` first uses it, macOS asks for your login password;
-        choose "Always Allow" to sign later builds without asking again.
-        After that, any program running as you can sign code with it
-        through `codesign`.
+        Each time `codesign` signs the app with it, macOS asks for your login
+        password. "Always Allow" would let any program running as you sign
+        code with it without asking.
         `brew autoupdate delete` removes it.
       EOS
     end

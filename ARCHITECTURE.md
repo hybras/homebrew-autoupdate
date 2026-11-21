@@ -280,10 +280,13 @@ user's login keychain.
   3. `security import … -k <login keychain> -T /usr/bin/codesign`
   4. `start` warns, `mkcert`-style, what it created, that macOS will ask for
      the login password, and how to remove it
-- **First use:** the key's partition list is not changed, so the first
-  `codesign` asks for the login password in a macOS dialog. "Always Allow"
-  lets later builds sign without asking. Nothing about the keychain is stored
-  on disk. Signing only happens in an interactive `start` or `restart`.
+- **Password per build (verified):** the key's partition list is not
+  changed, so every build's `codesign` asks for the login password in a macOS
+  dialog. "Allow" signs that build only; the maintainer does not choose
+  "Always Allow", which would let `codesign` use the key without asking.
+  Nothing about the keychain is stored on disk. Builds only happen in an
+  interactive `start` or `restart`, and only when the app's source or the
+  certificate changed, so most restarts ask nothing.
 - **No trust setting:** grants follow the certificate without one, and adding
   one would need an administrator prompt.
 - **Expiry:** `codesign` refuses an expired identity, so builds stop after 10
@@ -330,8 +333,9 @@ the certificate is unchanged.
 - Code the user can write (the job's scripts, Homebrew, taps) runs with the
   app's App Management permission. Granting it to Ruby or a terminal would
   expose the same.
-- After "Always Allow", any process running as the user can sign code with
-  the local certificate through `codesign`.
+- While the user answers the password dialog for a build, the program asking
+  is `codesign`, whoever ran it. "Always Allow", if chosen, would let any
+  process running as the user sign code with the certificate unprompted.
 - Each run that upgrades casks briefly writes a file into an app the user
   owns, as Homebrew does before each cask upgrade.
 
@@ -453,7 +457,6 @@ ones. This app cannot be notarized (requirement 9).
 ### Other limitations
 
 - Tested on macOS 15 only.
-- The login-keychain password dialog on first signing is not yet verified.
 - After a failed formula upgrade, casks are not upgraded in that run.
 - No network or Low Power Mode checks.
 
