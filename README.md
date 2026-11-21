@@ -28,7 +28,7 @@ This is a personal development fork of
 [DomT4/homebrew-autoupdate](https://github.com/DomT4/homebrew-autoupdate). It
 is not published for others to use: its helper app is not notarized, and is
 built from source on your own Mac (see
-[ARCHITECTURE](ARCHITECTURE.md#d07-notarization)).
+[ARCHITECTURE](ARCHITECTURE.md#gatekeeper-and-quarantine)).
 
 Only one tap can provide `brew autoupdate`. If you used DomT4's tap, run
 `brew autoupdate delete` with it first, then `brew untap domt4/autoupdate`:
@@ -276,8 +276,7 @@ so updating this tap does not change a running job. On schedule, `launchd`
 runs a launcher script, which opens the app; the app runs the updater script,
 which runs `brew update`, `upgrade` and `cleanup` as configured, then reports
 the result as a notification listing what was upgraded.
-[ARCHITECTURE](ARCHITECTURE.md) explains the design and the decisions behind
-it.
+[ARCHITECTURE](ARCHITECTURE.md) specifies the design.
 
 A job keeps the files it was started with. Whenever this tap's source
 changes, whether through `brew update` or your own edits, restart the job so
@@ -290,7 +289,7 @@ brew autoupdate restart
 `restart` reuses your saved options and keeps the app's permissions. When the
 tap's commit no longer matches the job's, the job's notifications and
 `brew autoupdate status` remind you
-([details](ARCHITECTURE.md#d38-applying-upgrades)). Uncommitted edits do not
+([details](ARCHITECTURE.md#applying-tap-changes)). Uncommitted edits do not
 trigger the reminder.
 
 ## Verifying what runs
@@ -324,7 +323,7 @@ are the same (see [ARCHITECTURE](ARCHITECTURE.md#reproducible-builds)).
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md) for setup, testing and building the app,
-and [ARCHITECTURE](ARCHITECTURE.md) for the design decisions.
+and [ARCHITECTURE](ARCHITECTURE.md) for the design.
 
 ## History
 

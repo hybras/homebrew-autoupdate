@@ -3,8 +3,8 @@
 Thanks for helping improve `brew autoupdate`. This guide covers setting up a
 development copy, the layout of the repository, testing, and building the
 helper app. For why things are the way they are, see
-[ARCHITECTURE](ARCHITECTURE.md); its decision entries (D01, D02 and so on) are
-linked below wherever a policy comes from one.
+[ARCHITECTURE](ARCHITECTURE.md), which specifies the design; it is linked
+below wherever a rule comes from it.
 
 ## Background reading
 
@@ -15,7 +15,7 @@ linked below wherever a policy comes from one.
   APIs.
 - Homebrew's [Reproducible Builds](https://docs.brew.sh/Reproducible-Builds)
   page explains the techniques this project relies on to make builds
-  verifiable ([D10](ARCHITECTURE.md#d10-provenance-and-verification)).
+  verifiable ([details](ARCHITECTURE.md#reproducible-builds)).
 
 ## Development setup
 
@@ -63,10 +63,10 @@ linked below wherever a policy comes from one.
   generators, which must stay loadable by plain `ruby` for their tests.
 - Run `brew style <you>/autoupdate` (or `brew style --fix …`).
 - No Sorbet signatures in `lib/`: plain `ruby` cannot load `sig`
-  ([D34](ARCHITECTURE.md#d34-style-per-language)).
+  ([Conventions](ARCHITECTURE.md#conventions)).
 - A subcommand is a `Homebrew::AbstractSubcommand` nested in
   `Homebrew::Cmd::Autoupdate`, in its own file in `lib/autoupdate/`, required
-  from `lib/autoupdate.rb` ([D19](ARCHITECTURE.md#d19-ruby-module-boundaries)).
+  from `lib/autoupdate.rb` ([Commands](ARCHITECTURE.md#commands)).
   Inside it, write `::Autoupdate` for this tap's module, since `Autoupdate`
   means the command class there.
 
@@ -85,15 +85,15 @@ linked below wherever a policy comes from one.
 
 - Keep the app's main executable compiled. A script main executable makes
   macOS attribute App Management to `/bin/sh` instead of the app
-  ([experiment](ARCHITECTURE.md#a-shell-script-app)).
+  ([verified](ARCHITECTURE.md#app-shape)).
 - Never run test builds of the app from `/tmp`: macOS refuses notification
-  permission there ([experiment](ARCHITECTURE.md#notifications)).
+  permission there ([verified](ARCHITECTURE.md#notification-permission)).
 - The launcher and the app are always generated and built together by
   `start`, so their arguments can change freely.
 - Names shared with Ruby (the support folder, script and status file names,
   the bundle ID) are checked by `test/constants_test.rb`.
 - Format with `swift format`, which ships with the toolchain
-  ([D34](ARCHITECTURE.md#d34-style-per-language)).
+  ([Conventions](ARCHITECTURE.md#conventions)).
 
 ### Documentation
 
@@ -134,7 +134,7 @@ BREW_AUTOUPDATE_APP="$PWD/.build/brew-autoupdate.app" ruby test/app_test.rb
 
 A registered job does not pick up source changes by itself. After changing
 anything a job runs, run `brew autoupdate restart`
-([D38](ARCHITECTURE.md#d38-applying-upgrades)). Uncommitted changes do not
+([details](ARCHITECTURE.md#applying-tap-changes)). Uncommitted changes do not
 trigger the restart reminder.
 
 When testing against your own launch agent, back up
@@ -146,7 +146,7 @@ runs your real update.
 
 App Management cannot be trusted from System Settings: `brew autoupdate
 status` shows what the last scheduled run found
-([why](ARCHITECTURE.md#system-settings-is-not-reliable)). Never test it by
+([why](ARCHITECTURE.md#system-settings)). Never test it by
 writing into apps in `/Applications` from a test or a terminal: macOS then
 asks to grant App Management to your terminal or editor.
 
@@ -167,19 +167,20 @@ pinned actions up to date.
 
 `brew autoupdate start` builds the app into the job's folder and signs it
 with the certificate from `Autoupdate::Signing`
-([D03](ARCHITECTURE.md#d03-how-the-app-reaches-users),
-[D40](ARCHITECTURE.md#d40-local-signing-certificate)). To build one yourself:
+([The app](ARCHITECTURE.md#the-app), [Signing](ARCHITECTURE.md#signing)). To
+build one yourself:
 
 ```sh
 CODESIGN_IDENTITY="<identity>" app/build.sh <output.app>
 ```
 
 `<identity>` is the name or SHA-1 of a code-signing certificate on your
-keychain search list. `-` (ad-hoc) is only for test builds, as in CI: an
+keychain search list, such as `brew-autoupdate local signing` in your login
+keychain. `-` (ad-hoc) is only for test builds, as in CI: an
 ad-hoc app loses its App Management grant whenever it changes, so don't run
-real jobs with it ([D39](ARCHITECTURE.md#d39-signing-modes)). Never
+real jobs with it ([details](ARCHITECTURE.md#app-management)). Never
 distribute the result: any binary given to others must be notarized
-([G10](ARCHITECTURE.md#goals)).
+([requirement 9](ARCHITECTURE.md#requirements)).
 
 - `build.sh` builds in a temporary directory and only replaces the output
   once signing and verification succeed.
@@ -188,7 +189,7 @@ distribute the result: any binary given to others must be notarized
   skips rebuilding when it matches and the app is signed with the current
   certificate.
 - Builds are reproducible only with the same Swift and SDK
-  ([experiment](ARCHITECTURE.md#reproducible-builds)).
+  ([verified](ARCHITECTURE.md#reproducible-builds)).
 - Keep the bundle ID unchanged: changing it resets the app's App Management
   and notification permission.
 
@@ -196,11 +197,10 @@ distribute the result: any binary given to others must be notarized
 
 A release today is a `version: bump` commit that updates `VERSION`;
 `brew autoupdate version` lists the changes since the previous one. Releases
-are not automated
-([D08](ARCHITECTURE.md#d08-release-trigger-and-changelog)).
+are not automated.
 
 ## Commits
 
 - Keep commits atomic, each with a message that explains why.
 - Subjects follow the existing `area: summary` style.
-- Style per language is in [D34](ARCHITECTURE.md#d34-style-per-language).
+- Style per language is in [Conventions](ARCHITECTURE.md#conventions).

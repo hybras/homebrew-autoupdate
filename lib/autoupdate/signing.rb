@@ -8,7 +8,7 @@ module Autoupdate
   # A self-signed code-signing certificate made on this Mac and kept in the
   # login keychain. macOS ties the app's App Management grant to this
   # certificate, so the grant survives rebuilds of the app. See
-  # ARCHITECTURE.md, D40.
+  # "Signing" in ARCHITECTURE.md.
   module Signing
     extend SystemCommand::Mixin
     extend Utils::Output::Mixin

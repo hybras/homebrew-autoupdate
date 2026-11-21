@@ -6,8 +6,8 @@ builds and signs it; `brew autoupdate start` runs `build.sh` to build the app
 into the job's folder. `notify-result.sh` turns a run's result into a
 notification.
 
-- How it works, and why: [ARCHITECTURE](../ARCHITECTURE.md), especially
-  [Internal interfaces](../ARCHITECTURE.md#internal-interfaces),
-  [D39 signing modes](../ARCHITECTURE.md#d39-signing-modes) and
-  [D40 local signing certificate](../ARCHITECTURE.md#d40-local-signing-certificate).
+- How it works: [ARCHITECTURE](../ARCHITECTURE.md), especially
+  [Interfaces](../ARCHITECTURE.md#interfaces),
+  [The app](../ARCHITECTURE.md#the-app) and
+  [Signing](../ARCHITECTURE.md#signing).
 - How to build, sign and test it: [CONTRIBUTING](../CONTRIBUTING.md#building-and-signing-the-app).
