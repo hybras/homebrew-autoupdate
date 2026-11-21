@@ -20,7 +20,6 @@ let package = Package(
       exclude: [
         "README.md",
         "applet.icns",
-        "brew-autoupdate.app",
         "build.sh",
         "notify-result.sh",
       ],

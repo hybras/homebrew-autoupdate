@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require "digest"
 require "fileutils"
 require "open3"
 require "tempfile"
@@ -52,56 +51,6 @@ class AppTest < Minitest::Test
     assert_empty output
   end
 
-  def test_committed_app_matches_the_shared_version
-    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
-    output, status = Open3.capture2(
-      "/usr/bin/plutil",
-      "-extract",
-      "CFBundleShortVersionString",
-      "raw",
-      plist,
-    )
-
-    assert_predicate status, :success?
-    assert_equal VERSION, output.strip
-  end
-
-  def test_committed_app_has_a_valid_signature
-    app = File.join(ROOT, "app/brew-autoupdate.app")
-    _stdout, stderr, status = Open3.capture3(
-      "/usr/bin/codesign",
-      "--verify",
-      "--deep",
-      "--strict",
-      app,
-    )
-
-    assert_predicate status, :success?, stderr
-  end
-
-  def test_committed_app_was_built_from_the_current_sources
-    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
-    output, = Open3.capture2("/usr/bin/plutil", "-extract", "BrewAutoupdateSourcesSHA256", "raw", plist)
-    sources = %w[app/BrewAutoupdate.swift app/build.sh].map { |path| File.binread(File.join(ROOT, path)) }
-
-    assert_equal Digest::SHA256.hexdigest(sources.join), output.strip,
-                 "Rebuild the committed app with app/build.sh"
-  end
-
-  def test_committed_app_runs_as_a_background_ui_helper
-    plist = File.join(ROOT, "app/brew-autoupdate.app/Contents/Info.plist")
-    output, status = Open3.capture2(
-      "/usr/bin/plutil",
-      "-extract",
-      "LSUIElement",
-      "raw",
-      plist,
-    )
-
-    assert_predicate status, :success?
-    assert_equal "true", output.strip
-  end
-
   def test_passes_the_summary_to_the_app
     output, status = invoke_fake_app(0, "Already up-to-date.\n")
 
@@ -117,20 +66,6 @@ class AppTest < Minitest::Test
     )
   end
 
-  def test_the_old_notifier_path_forwards_to_the_renamed_script
-    Tempfile.create("autoupdate-notify") do |log|
-      log.write("Already up-to-date.\n")
-      log.flush
-      stdout, status = Open3.capture2(
-        { "AUTOUPDATE_NOTIFY_PRINT" => "1" },
-        File.join(ROOT, "notifier/notify.sh"), "0", log.path, "always", "/old/notifier/brew-autoupdate.app"
-      )
-
-      assert_predicate status, :success?
-      assert_includes stdout, "Homebrew is already up-to-date."
-    end
-  end
-
   def test_app_failure_is_reported_without_failing_autoupdate
     output, status = invoke_fake_app(0, "Already up-to-date.\n", helper_status: 1)
 
@@ -139,11 +74,21 @@ class AppTest < Minitest::Test
   end
 
   def test_built_app_is_universal
-    app = ENV.fetch("BREW_AUTOUPDATE_APP") { skip "set BREW_AUTOUPDATE_APP to an app built by app/build.sh" }
-    executable = File.join(app, "Contents/MacOS/brew-autoupdate")
-    architectures, = Open3.capture2("/usr/bin/lipo", "-archs", executable)
+    architectures, = Open3.capture2("/usr/bin/lipo", "-archs", File.join(built_app, "Contents/MacOS/brew-autoupdate"))
 
     assert_equal %w[arm64 x86_64], architectures.split.sort
+  end
+
+  def test_built_app_matches_the_shared_version
+    assert_equal VERSION, info_plist_value("CFBundleShortVersionString")
+  end
+
+  def test_built_app_runs_as_a_background_ui_helper
+    assert_equal "true", info_plist_value("LSUIElement")
+  end
+
+  def test_built_app_requires_macos_15
+    assert_equal "15.0", info_plist_value("LSMinimumSystemVersion")
   end
 
   def test_built_executable_rejects_invalid_arguments
@@ -167,6 +112,15 @@ class AppTest < Minitest::Test
   end
 
   private
+
+  def built_app
+    ENV.fetch("BREW_AUTOUPDATE_APP") { skip "set BREW_AUTOUPDATE_APP to an app built by app/build.sh" }
+  end
+
+  def info_plist_value(key)
+    output, = Open3.capture2("/usr/bin/plutil", "-extract", key, "raw", File.join(built_app, "Contents/Info.plist"))
+    output.strip
+  end
 
   def summarize(exit_status, contents, mode: "always")
     Tempfile.create("autoupdate-notify") do |log|

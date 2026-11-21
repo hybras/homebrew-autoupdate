@@ -37,9 +37,15 @@ module Autoupdate
       Pathname.new(File.expand_path("~/Library/Application Support/#{name}"))
     end
 
-    # The signed helper app that posts notifications and runs scheduled updates.
+    # The helper app that posts notifications and runs scheduled updates.
+    # `start` builds and signs it here, so tap upgrades do not change it.
     def app
-      tap_dir/"app/brew-autoupdate.app"
+      location/"brew-autoupdate.app"
+    end
+
+    # Copied from the tap by `start`, like everything else a job runs.
+    def notify_script
+      location/"notify-result.sh"
     end
 
     def config_file

@@ -1,14 +1,15 @@
 #!/bin/bash
 
-# Usage: CODESIGN_IDENTITY=<identity> app/build.sh [output.app]
-# Builds, signs and verifies the app, then installs it at output.app, which
-# defaults to the committed app. CI passes `-` (ad-hoc) and a temporary path.
+# Usage: CODESIGN_IDENTITY=<identity> app/build.sh <output.app>
+# Builds, signs and verifies the app, then installs it at output.app.
+# `brew autoupdate start` passes its local certificate and the job's support
+# directory; CI and tests pass `-` (ad-hoc) and a temporary path.
 
 set -eu
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
 source_file="${script_dir}/BrewAutoupdate.swift"
-output_app="${1:-${script_dir}/brew-autoupdate.app}"
+output_app="${1:?usage: CODESIGN_IDENTITY=<identity> app/build.sh <output.app>}"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
 version=$(<"${version_file}")
@@ -21,7 +22,7 @@ trap '/bin/rm -rf "$build_dir"' EXIT
 
 if [[ -z "${identity}" ]]
 then
-  echo "Set CODESIGN_IDENTITY to a local Apple code-signing identity." >&2
+  echo "Set CODESIGN_IDENTITY to a code-signing identity, or - for ad-hoc." >&2
   exit 1
 fi
 
@@ -59,7 +60,7 @@ fi
 /usr/bin/plutil -insert LSMinimumSystemVersion -string "15.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSUIElement -bool true "${build_app}/Contents/Info.plist"
 
-# Lets CI check that the committed app was built from the current sources.
+# Lets `brew autoupdate start` skip rebuilding an app built from the same sources.
 /bin/cat "${source_file}" "${script_dir}/build.sh" >"${build_dir}/sources"
 sources_sha256=$(/usr/bin/shasum -a 256 "${build_dir}/sources")
 sources_sha256=${sources_sha256%% *}

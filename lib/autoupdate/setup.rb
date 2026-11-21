@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
+require "digest"
+require "system_command"
 require "utils/output"
 
 module Autoupdate
   # Writes everything a job runs and loads its launch agent; shared by
   # `start` and `restart`.
   module Setup
+    extend SystemCommand::Mixin
     extend Utils::Output::Mixin
 
     module_function
@@ -36,6 +39,7 @@ module Autoupdate
       log = log_path
 
       config.save(Autoupdate::Core.config_file)
+      build_app
       write_scripts(config, location:, log:)
       write_launch_agent(config, location:, log:)
       Autoupdate::Launchd.load(Autoupdate::Core.plist)
@@ -119,12 +123,36 @@ module Autoupdate
       end
     end
 
+    # Builds the app from this tap's source into the job's support directory
+    # and signs it with the local certificate, unless the app there was
+    # already built from the same source and signed with that certificate.
+    def build_app
+      identity = Autoupdate::Signing.identity
+      app = Autoupdate::Core.app
+      app_dir = Autoupdate::Core.tap_dir/"app"
+      # Matches the hash `build.sh` records.
+      sources = %w[BrewAutoupdate.swift build.sh].map { |name| (app_dir/name).binread }.join
+      if app.exist?
+        built_from = Utils.popen_read("/usr/bin/plutil", "-extract", "BrewAutoupdateSourcesSHA256", "raw",
+                                      app/"Contents/Info.plist")
+        # The designated requirement names the certificate by its SHA-1.
+        requirement = system_command("/usr/bin/codesign", args: ["-d", "-r-", app], print_stderr: false).merged_output
+        current = built_from.strip == Digest::SHA256.hexdigest(sources)
+        return if current && requirement.downcase.include?("h\"#{identity.downcase}\"")
+      end
+
+      ohai "Building #{app.basename} from #{app_dir}"
+      system_command! app_dir/"build.sh", args: [app], env: { "CODESIGN_IDENTITY" => identity }, print_stderr: false
+    end
+
     def write_scripts(config, location:, log:)
+      write_executable(Autoupdate::Core.notify_script, (Autoupdate::Core.tap_dir/"app/notify-result.sh").read)
+
       sudo_askpass = location/"brew_autoupdate_sudo_gui"
       if config.sudo
         write_executable(sudo_askpass, Autoupdate::Script.sudo_askpass(
                                          prefix: HOMEBREW_PREFIX,
-                                         icon:   Autoupdate::Core.tap_dir/"app/applet.icns",
+                                         icon:   Autoupdate::Core.app/"Contents/Resources/applet.icns",
                                        ))
       end
 
@@ -183,10 +211,11 @@ module Autoupdate
       puts <<~EOS
 
         To upgrade cask apps in place (keeping their Dock position and settings),
-        turn on "brew-autoupdate" in System Settings > Privacy & Security > App Management.
-        It appears there, switched off, after the first scheduled upgrade macOS blocks;
-        you can also add it now with the + button. The app is located at:
+        grant the app App Management: in System Settings > Privacy & Security >
+        App Management, click +, press Cmd+Shift+G and enter:
           #{Autoupdate::Core.app}
+        It may not stay visible in that list. `brew autoupdate status` shows
+        whether the last scheduled run had the permission.
       EOS
     end
   end

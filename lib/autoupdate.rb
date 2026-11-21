@@ -14,6 +14,7 @@ require_relative "autoupdate/launcher"
 require_relative "autoupdate/notify"
 require_relative "autoupdate/script"
 require_relative "autoupdate/setup"
+require_relative "autoupdate/signing"
 
 # Subcommands, in reverse of the order `--help` lists them.
 require_relative "autoupdate/version"

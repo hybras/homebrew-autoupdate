@@ -7,13 +7,9 @@ module Autoupdate
   module Notify
     module_function
 
-    def script
-      File.join(Autoupdate::Core.tap_dir, "app", "notify-result.sh")
-    end
-
     def command(mode:)
       [
-        Shellwords.escape(script),
+        Shellwords.escape(Autoupdate::Core.notify_script.to_s),
         "\"$status\"",
         "\"$run_log\"",
         Shellwords.escape(mode),

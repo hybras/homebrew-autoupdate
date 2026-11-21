@@ -7,13 +7,15 @@ module Homebrew
         subcommand_args do
           usage_banner <<~EOS
             `autoupdate delete`:
-            Stop autoupdating and delete its launch agent, configuration, and logs.
+            Stop autoupdating and delete everything `start` created: the launch agent,
+            app, signing certificate, configuration, and logs.
           EOS
           named_args :none
         end
 
         def run
           ::Autoupdate::Launchd.unload
+          ::Autoupdate::Signing.delete
           FileUtils.rm_f Dir[File.join(::Autoupdate::Core.fallback_logs, "#{::Autoupdate::Core.name}.*")]
           FileUtils.rm_f ::Autoupdate::Core.plist
           FileUtils.rm_rf ::Autoupdate::Core.location
