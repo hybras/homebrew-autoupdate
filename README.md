@@ -23,8 +23,11 @@ brew tap hybras/autoupdate
 brew trust --command hybras/autoupdate/autoupdate
 ```
 
-This is a fork of [DomT4/homebrew-autoupdate](https://github.com/DomT4/homebrew-autoupdate).
-Only one tap can provide `brew autoupdate`, so if you have DomT4's tap
+This is a personal development fork of
+[DomT4/homebrew-autoupdate](https://github.com/DomT4/homebrew-autoupdate). It
+is not published for others to use: its helper app is not notarized, and is
+meant to be built from source on your own Mac (see
+[ARCHITECTURE](ARCHITECTURE.md#d07-notarization)). Only one tap can provide `brew autoupdate`, so if you have DomT4's tap
 installed, remove it first with `brew untap domt4/autoupdate`. An existing
 schedule keeps working: this tap manages the same launch agent.
 

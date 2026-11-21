@@ -161,8 +161,13 @@ pinned actions up to date.
 ## Building and signing the app
 
 ```sh
-CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" app/build.sh
+CODESIGN_IDENTITY="<identity>" app/build.sh
 ```
+
+`<identity>` is `-` for an ad-hoc signature or the name or SHA-1 of a
+self-signed certificate in your keychain. Never distribute the result: any
+binary given to others must be notarized
+([G10](ARCHITECTURE.md#goals)).
 
 - Without an output path, `build.sh` replaces the committed app; give a path
   to build somewhere else. It builds in a temporary directory and only
@@ -175,10 +180,10 @@ CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)" app/build.sh
 - Keep the bundle ID unchanged: changing it resets every user's App
   Management and notification permission.
 
-How the app is signed and delivered in future is decided in
-[D39](ARCHITECTURE.md#d39-signing-modes) (signing modes) and still open in
-[D03](ARCHITECTURE.md#d03-how-the-app-reaches-users) (delivery). CI signing for
-the `developer` mode is not set up yet.
+The plan is for `brew autoupdate start` to build and sign the app on each
+user's Mac ([D03](ARCHITECTURE.md#d03-how-the-app-reaches-users),
+[D39](ARCHITECTURE.md#d39-signing-modes)), after which the committed app goes.
+Until then, the committed app is a local convenience, not a release.
 
 ## Releases
 

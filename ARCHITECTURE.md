@@ -65,26 +65,32 @@ Conventions used throughout:
   [D38](#d38-applying-upgrades).
 - **G8. Certificates, in order of preference:** none at all; then a
   certificate generated on the user's machine, with a clear warning (as
-  [`mkcert`](https://github.com/FiloSottile/mkcert) does); and a developer's
-  certificate only where one is unavoidable. See
-  [D39](#d39-signing-modes).
+  [`mkcert`](https://github.com/FiloSottile/mkcert) does). A developer's
+  certificate would only be needed to distribute binaries, which G10 rules
+  out. See [D39](#d39-signing-modes).
 - **G9 (relaxed). Keep the app's identity stable.** With ad-hoc signing, an
   App Management grant lasts exactly as long as the app's binary. With a
   certificate, it survives changes. Since [D39](#d39-signing-modes) offers
   certificate-based modes, the app no longer has to be a minimal launcher.
   Its main executable must still be compiled (see
   [the script app experiment](#a-shell-script-app)).
+- **G10. No prebuilt binaries are distributed.** Every user builds the app
+  from source on their own Mac. Anything that is ever distributed as a binary
+  must be notarized; notarization is never bypassed, including by delivering
+  an unnotarized binary through `git pull`, which escapes quarantine. This fork
+  is not published for others to consume. See [D03](#d03-how-the-app-reaches-users)
+  and [D07](#d07-notarization).
 
 ### Tensions between goals
 
 - **G6 against G7:** jobs are isolated from upgrades, yet upgrades should
   reach them. The resolution is to switch at a defined point, never mid-run
   ([D38](#d38-applying-upgrades)).
-- **G5 against developer-signed builds:** users cannot check a developer's
-  binary against their own rebuild unless both use the same toolchain, and the
-  toolchain cannot be pinned (it comes from Homebrew's requirements). Local
-  builds satisfy G5 fully; the `developer` signing mode relies on attestation
-  ([D10](#d10-provenance-and-verification)).
+- **G5 against developer-signed builds (resolved by G10):** users cannot
+  check a developer's binary against their own rebuild unless both use the
+  same toolchain, and the toolchain cannot be pinned (it comes from Homebrew's
+  requirements). Building locally satisfies G5 fully, so no developer-signed
+  build is offered.
 - **G2 and G3 against G5:** moving logic into readable scripts helps auditing
   but can spread it across languages.
 
@@ -226,17 +232,23 @@ trade-offs, research and the goals it touches.
 
 #### D03. How the app reaches users
 
-- **Status:** Open, shaped by [D39](#d39-signing-modes). Current: a signed
-  binary committed in git and updated by `brew update`.
+- **Status:** Decided: `start` builds the app from source on the user's Mac
+  and signs it there ([D39](#d39-signing-modes)). Current: a signed binary
+  committed in git and updated by `brew update`; it is to be removed, leaving
+  only text in the repository.
 - **Options:**
-  - a binary committed in git (current; `developer` mode in D39)
-  - built on the user's machine from source by `start` (`adhoc` and `local`
-    modes in D39)
-  - a cask installing a notarized GitHub release ⚙ (needs notarization:
-    downloads are quarantined and `cask/audit.rb` fails artifacts that do not
-    pass Gatekeeper)
-  - `start` downloads a release with `curl` (not quarantined) and verifies it
-  - a formula installing a prebuilt app or building it from source
+  - a binary committed in git (current; rejected by G10: an unnotarized
+    binary delivered through git escapes quarantine rather than passing
+    notarization)
+  - built on the user's machine from source by `start` (decided)
+  - a cask installing a notarized GitHub release ⚙ (rejected by G10: nothing
+    is distributed; it would need notarization, since downloads are
+    quarantined and `cask/audit.rb` fails artifacts that do not pass
+    Gatekeeper)
+  - `start` downloads a release with `curl` (rejected by G10: it escapes
+    quarantine the same way git does)
+  - a cask or formula that builds the app from source (rejected, see
+    [D03b](#d03b-a-cask-that-builds-or-assembles-the-app))
 - **Rejected or constrained by experiment:**
   - A shell-script main executable: macOS holds `/bin/sh` responsible, and
     interpreted Swift cannot post notifications
@@ -253,21 +265,31 @@ trade-offs, research and the goals it touches.
 
 #### D03b. A cask that builds or assembles the app
 
-- **Status:** Open.
+- **Status:** Decided: rejected. `start` builds and signs instead.
 - **Research (verified in Homebrew's source):**
   - Quarantine is applied when a download is extracted
     (`cask/download.rb:128`), before `preflight_steps` run, so files a
-    preflight step creates are not quarantined.
+    preflight step creates are not quarantined. A locally built app would
+    need no notarization.
   - Preflight steps run in Homebrew's cask sandbox
     (`cask/artifact/install_steps.rb`, `cask/artifact/abstract_artifact.rb:216`):
     writes are limited, the network is off unless a step asks for it, and
-    reading `~/Library/Keychains` is denied (`sandbox.rb:527`). Signing with
-    a keychain identity there will most likely fail.
+    `HOME` is set to a temporary directory
+    (`cask/artifact/abstract_artifact.rb:239-258`). Reading the real
+    `~/Library/Keychains` is denied as well (`sandbox.rb:527`). `codesign`
+    therefore cannot reach a signing identity in the login keychain, whether
+    self-signed or a free Apple Development certificate. The cask could only
+    sign ad-hoc.
   - On Apple silicon, keg relocation re-signs ad-hoc only the binaries it
     patches (`extend/os/mac/keg.rb`, `keg_relocate.rb`).
-- **Experiment needed:** whether a Swift binary linked only against system
-  libraries is ever patched during relocation.
-- **Goals:** G5, G8.
+- **Why rejected:**
+  - Signing with the local certificate would still have to happen in `start`,
+    outside the sandbox, so a cask would only duplicate the build step.
+  - `brew upgrade` would replace the app on its own schedule, possibly during
+    a run, which breaks G6.
+- **Experiment not run:** a test cask that calls `codesign` with a keychain
+  identity in a preflight step (expected to fail, from the code above).
+- **Goals:** G5, G6, G8, G10.
 
 #### D04. Dependency between the command and the app
 
@@ -289,15 +311,20 @@ trade-offs, research and the goals it touches.
 
 #### D06. Who builds and signs
 
-- **Status:** Decided by [D39](#d39-signing-modes): CI signs in `developer`
-  mode; users sign locally in `adhoc` and `local` modes.
-- **Research:** GitHub's documented recipe imports a base64 `.p12` into a
-  temporary keychain (`security create-keychain`, `import`,
-  `set-key-partition-list`); hosted runners are destroyed after the job.
+- **Status:** Decided by [D39](#d39-signing-modes) and G10: users build and
+  sign on their own Mac. CI builds with an ad-hoc signature only to test, and
+  publishes nothing for users to run.
+- **Research:** should a signed CI build ever be needed, GitHub's documented
+  recipe imports a base64 `.p12` into a temporary keychain
+  (`security create-keychain`, `import`, `set-key-partition-list`); hosted
+  runners are destroyed after the job.
 
 #### D07. Notarization
 
-- **Status:** Decided: sign only; no notarization.
+- **Status:** Decided: notarization is never bypassed (G10). Nothing is
+  distributed as a binary, so nothing needs notarizing; any future
+  distributed binary must be notarized. Apps built and signed on the user's
+  Mac are not distributed and are never quarantined.
 - **Research:**
   - Apple: "Beginning in macOS 10.15, all software built after June 1, 2019,
     and distributed with Developer ID must be notarized"
@@ -309,13 +336,16 @@ trade-offs, research and the goals it touches.
   - Notarization requires a Developer ID, the Hardened Runtime and a secure
     timestamp; it is done with `notarytool`, and stapling is recommended.
 - **Consequences recorded with the decision:**
-  - `developer` builds must reach users unquarantined (git, or a plain `curl`
-    download), never through a cask.
+  - Upstream's approach, a Developer ID app without notarization delivered
+    through git, is not acceptable: it relies on git not quarantining files.
+  - An earlier decision here ("sign only, no notarization", with a CI-signed
+    binary in git) was reversed for that reason.
   - [#255](https://github.com/DomT4/homebrew-autoupdate/issues/255) reports
-    that macOS 27 refuses notification permission to the unnotarized app
-    (unverified here).
-  - Locally built apps (`adhoc`, `local`) are not "distributed with Developer
-    ID", so Apple's policy does not cover them.
+    that macOS 27 refuses notification permission to unnotarized apps,
+    including ad-hoc and self-signed ones (unverified here). If that holds,
+    local builds on macOS 27 cannot post notifications; scheduled updates
+    still run, and results stay visible in `status` and the log
+    ([D29](#d29-notifications)).
 
 #### D08. Release trigger and changelog
 
@@ -332,13 +362,13 @@ trade-offs, research and the goals it touches.
 
 #### D10. Provenance and verification
 
-- **Status:** Decided per [D39](#d39-signing-modes): local modes need none
-  (users build from source); `developer` mode uses build attestation.
+- **Status:** Decided: users build from source, so there is no binary to
+  verify (G5, G10).
 - **Options:**
   - the source-hash guard (current, ⚙): CI checks that the committed app was
-    built from the current sources
+    built from the current sources; it goes once the committed app is removed
   - build attestation in CI (`actions/attest-build-provenance`, checked with
-    `gh attestation verify`) ⚙
+    `gh attestation verify`) ⚙; not needed while nothing is distributed
   - reproducible builds plus a `brew autoupdate verify` command ⚙
 - **Research (verified):**
   - Builds are bit-for-bit reproducible with the same Swift and SDK, across
@@ -350,8 +380,9 @@ trade-offs, research and the goals it touches.
 
 #### D11. Whose certificate
 
-- **Status:** Decided by [D39](#d39-signing-modes): no developer certificate by
-  default; `developer` mode uses the maintainer's.
+- **Status:** Decided by [D39](#d39-signing-modes) and G10: no developer
+  certificate. The only certificate is one the user's own Mac generates
+  (`local` mode).
 - **Research:**
   - Upstream signs with "Developer ID Application: Dominyk Tiller
     (S8FDSZ4D97)", an individual Apple Developer Program membership, not
@@ -487,31 +518,36 @@ trade-offs, research and the goals it touches.
 
 #### D39. Signing modes
 
-- **Status:** Decided. All three modes are supported and chosen at `start`
-  (for example `--signing=adhoc|local|developer`, saved in `config.json`).
-- **What all modes share:** the app's main executable is compiled; the job's
-  snapshot lives under `~/Library/Application Support`; the bundle ID never
-  changes.
+- **Status:** Decided. Two modes, chosen at `start` (for example
+  `--signing=adhoc|local`, saved in `config.json`). A third, `developer`
+  (a CI-signed binary committed to git), was dropped by G10.
+- **What both modes share:** `start` builds the app from source with the
+  user's toolchain; the app's main executable is compiled; the job's snapshot
+  lives under `~/Library/Application Support`; the bundle ID never changes.
 
 | Mode | Where the app comes from | Identity macOS uses | When the app changes | Trust and risk |
 | --- | --- | --- | --- | --- |
 | `adhoc` (default) | built locally from source with the user's toolchain | the code hash | manual: the job and `status` report an update; the user reruns `start`, which rebuilds, re-signs and needs App Management granted again | nobody needs to be trusted; nothing to manage |
 | `local` | built locally from source | a self-signed certificate created on the user's machine, with an `mkcert`-style warning | automatic: rebuilt and re-signed with the same certificate; grants are kept | any process running as the user can sign with that key; `delete` removes it |
-| `developer` | a binary that CI builds, signs, attests and commits to git, in the style of Homebrew's bottle publishing (`brew test-bot`, `brew pr-pull`) | the developer's certificate | automatic through git; the job switches to the new binary at a run boundary, never mid-run (G6) | trust the developer's certificate and CI's attestation; a binary in the repository; not notarized ([D07](#d07-notarization)) |
 
 - **Research (verified):**
   - Notification permission belongs to the bundle ID and is never requested
     again when the signature changes ([details](#notifications)).
   - Grants survive a certificate's expiry; an expired certificate only stops
     new builds from being signed ([details](#certificate-expiry)).
-- **Requirements by mode:**
+- **Requirements:**
   - `status` must show the mode, the identity, and whether App Management is
     really granted, using Homebrew's write check
     (`Cask::Quarantine.app_management_permissions_granted?`). The System
     Settings list proved unreliable ([details](#system-settings-is-not-reliable)).
-  - CI for `developer`: a pinned runner image, signing secrets,
-    `actions/attest-build-provenance`, a bot pull request updating the
-    committed app, and the existing source-hash guard ⚙.
+  - Signing happens in `start`, outside Homebrew's sandbox; a cask cannot
+    reach the keychain ([D03b](#d03b-a-cask-that-builds-or-assembles-the-app)).
+  - `local` mode's risk (any process running as the user can sign with the
+    key) is accepted, because only the maintainer uses this fork (G10). It
+    would need revisiting before anyone else does.
+  - `local` mode's certificate needs a long validity: `codesign` refuses an
+    expired identity, and a new certificate means granting App Management
+    again. It should be trusted for code signing only.
 
 ### D. Command-line interfaces
 
@@ -593,8 +629,9 @@ trade-offs, research and the goals it touches.
   the home folder ([details](#notifications)). macOS 27 is reported to need
   notarization ([#255](https://github.com/DomT4/homebrew-autoupdate/issues/255),
   unverified).
-- **Options:** notarize (conflicts with [D07](#d07-notarization)) / make
-  notifications optional and report failures in `status` and the log / both.
+- **Options:** make notifications optional and report failures in `status`
+  and the log. Notarizing is not available, because nothing is distributed
+  (G10, [D07](#d07-notarization)).
 
 ### F. Identity and compatibility
 
@@ -650,7 +687,9 @@ trade-offs, research and the goals it touches.
 
 #### D35. Merge or replace
 
-- **Status:** Open. See [Merging upstream or replacing it](#merging-upstream-or-replacing-it).
+- **Status:** Decided for now: neither. This fork is not published for others
+  to consume (G10). See [Merging upstream or replacing it](#merging-upstream-or-replacing-it)
+  for what either would involve.
 
 ## Appendix: experiments
 
@@ -808,20 +847,23 @@ This fork is 20 commits ahead of `DomT4/homebrew-autoupdate`.
 
 **Worse or risky:**
 
-- The fork has no signed app yet, so notifications and App Management through
-  the app need a rebuild first.
+- The fork's committed app is out of date, so notifications and App
+  Management through the app need a local build first; building in `start`
+  (D03) is not implemented yet.
 - Jobs still use files in the tap (G6 is not met); upstream has the same
   problem.
-- The committed binary cannot be verified against its sources (G5).
+- The committed binary cannot be verified against its sources (G5) until it
+  is removed.
 - Testing so far covers macOS 15 only, on one Intel and one Apple silicon Mac.
 
 ## Merging upstream or replacing it
 
-With G4, replacement is the default framing; a merge remains possible.
+Neither is planned while the fork is not published for others (G10). If that
+changes:
 
 - **Merge:** split the work into reviewable pull requests by area: bug fixes
-  first, then the refactor, then the app. DomT4 would rebuild and sign the
-  app.
+  first, then the refactor, then the app. Upstream would have to either build
+  the app on users' Macs or notarize its binary.
 - **Replacement:**
   - Users run `brew untap domt4/autoupdate`, `brew tap hybras/autoupdate` and
     `brew trust`.
