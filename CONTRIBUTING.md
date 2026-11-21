@@ -164,8 +164,10 @@ pinned actions up to date.
 CODESIGN_IDENTITY="<identity>" app/build.sh
 ```
 
-`<identity>` is `-` for an ad-hoc signature or the name or SHA-1 of a
-self-signed certificate in your keychain. Never distribute the result: any
+`<identity>` is the name or SHA-1 of a self-signed certificate in your
+keychain. `-` (ad-hoc) is only for test builds, as in CI: an ad-hoc app loses
+its App Management grant whenever it changes, so don't run real jobs with it
+([D39](ARCHITECTURE.md#d39-signing-modes)). Never distribute the result: any
 binary given to others must be notarized
 ([G10](ARCHITECTURE.md#goals)).
 

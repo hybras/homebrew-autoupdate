@@ -63,16 +63,16 @@ Conventions used throughout:
   subcommand by hand.** Whatever channels are chosen must share one source of
   truth, including the existing 90-day warning if it is kept. See
   [D38](#d38-applying-upgrades).
-- **G8. Certificates, in order of preference:** none at all; then a
-  certificate generated on the user's machine, with a clear warning (as
-  [`mkcert`](https://github.com/FiloSottile/mkcert) does). A developer's
-  certificate would only be needed to distribute binaries, which G10 rules
-  out. See [D39](#d39-signing-modes).
-- **G9 (relaxed). Keep the app's identity stable.** With ad-hoc signing, an
-  App Management grant lasts exactly as long as the app's binary. With a
-  certificate, it survives changes. Since [D39](#d39-signing-modes) offers
-  certificate-based modes, the app no longer has to be a minimal launcher.
-  Its main executable must still be compiled (see
+- **G8. A certificate generated on the user's machine,** with a clear warning
+  (as [`mkcert`](https://github.com/FiloSottile/mkcert) does). Using no
+  certificate (ad-hoc signing) was the first preference, but was dropped
+  because every app change would cost the App Management grant. A
+  developer's certificate would only be needed to distribute binaries, which
+  G10 rules out. See [D39](#d39-signing-modes).
+- **G9 (relaxed). Keep the app's identity stable.** The grant follows the
+  local certificate, so it survives changes to the app, and the app no
+  longer has to be a minimal launcher. Its main executable must still be
+  compiled (see
   [the script app experiment](#a-shell-script-app)).
 - **G10. No prebuilt binaries are distributed.** Every user builds the app
   from source on their own Mac. Anything that is ever distributed as a binary
@@ -382,7 +382,7 @@ trade-offs, research and the goals it touches.
 
 - **Status:** Decided by [D39](#d39-signing-modes) and G10: no developer
   certificate. The only certificate is one the user's own Mac generates
-  (`local` mode).
+  ([D39](#d39-signing-modes)).
 - **Research:**
   - Upstream signs with "Developer ID Application: Dominyk Tiller
     (S8FDSZ4D97)", an individual Apple Developer Program membership, not
@@ -518,17 +518,19 @@ trade-offs, research and the goals it touches.
 
 #### D39. Signing modes
 
-- **Status:** Decided. Two modes, chosen at `start` (for example
-  `--signing=adhoc|local`, saved in `config.json`). A third, `developer`
-  (a CI-signed binary committed to git), was dropped by G10.
-- **What both modes share:** `start` builds the app from source with the
-  user's toolchain; the app's main executable is compiled; the job's snapshot
-  lives under `~/Library/Application Support`; the bundle ID never changes.
-
-| Mode | Where the app comes from | Identity macOS uses | When the app changes | Trust and risk |
-| --- | --- | --- | --- | --- |
-| `adhoc` (default) | built locally from source with the user's toolchain | the code hash | manual: the job and `status` report an update; the user reruns `start`, which rebuilds, re-signs and needs App Management granted again | nobody needs to be trusted; nothing to manage |
-| `local` | built locally from source | a self-signed certificate created on the user's machine, with an `mkcert`-style warning | automatic: rebuilt and re-signed with the same certificate; grants are kept | any process running as the user can sign with that key; `delete` removes it |
+- **Status:** Decided: one mode, so there is no `--signing` option. `start`
+  builds the app from source with the user's toolchain and signs it with a
+  self-signed certificate created on the user's Mac, with an `mkcert`-style
+  warning. When the app changes, it is rebuilt and re-signed with the same
+  certificate and grants are kept. The app's main executable is compiled, the
+  job's snapshot lives under `~/Library/Application Support`, and the bundle
+  ID never changes.
+- **Dropped modes:**
+  - `developer` (a CI-signed binary committed to git), by G10.
+  - `adhoc`: its identity is the code hash, so every change to the app's
+    source or the user's toolchain would lose the App Management grant and
+    need it granted again by hand. Ad-hoc signing remains only for test
+    builds in CI and development, which never run real jobs.
 
 - **Research (verified):**
   - Notification permission belongs to the bundle ID and is never requested
@@ -536,16 +538,16 @@ trade-offs, research and the goals it touches.
   - Grants survive a certificate's expiry; an expired certificate only stops
     new builds from being signed ([details](#certificate-expiry)).
 - **Requirements:**
-  - `status` must show the mode, the identity, and whether App Management is
+  - `status` must show the signing identity, and whether App Management is
     really granted, using Homebrew's write check
     (`Cask::Quarantine.app_management_permissions_granted?`). The System
     Settings list proved unreliable ([details](#system-settings-is-not-reliable)).
   - Signing happens in `start`, outside Homebrew's sandbox; a cask cannot
     reach the keychain ([D03b](#d03b-a-cask-that-builds-or-assembles-the-app)).
-  - `local` mode's risk (any process running as the user can sign with the
-    key) is accepted, because only the maintainer uses this fork (G10). It
-    would need revisiting before anyone else does.
-  - `local` mode's certificate needs a long validity: `codesign` refuses an
+  - The local certificate's risk (any process running as the user can sign
+    with the key) is accepted, because only the maintainer uses this fork
+    (G10). It would need revisiting before anyone else does.
+  - The certificate needs a long validity: `codesign` refuses an
     expired identity, and a new certificate means granting App Management
     again. It should be trusted for code signing only.
 
