@@ -80,6 +80,23 @@ class ScriptTest < Minitest::Test
     assert_includes output, "notify 2"
   end
 
+  def test_each_run_writes_its_own_log
+    output, = run_updater(config)
+
+    assert_match(%r{exit status 0; see #{Regexp.escape(@dir)}/runs/\d{4}-\d\d-\d\d-\d{6}\.log}, output)
+  end
+
+  def test_only_the_newest_runs_are_kept
+    FileUtils.mkdir_p(File.join(@dir, "runs"))
+    (1..Autoupdate::Script::KEPT_RUNS).each do |day|
+      FileUtils.touch(File.join(@dir, "runs", format("2000-01-%02d-000000.log", day)))
+    end
+    run_updater(config)
+
+    assert_equal Autoupdate::Script::KEPT_RUNS, run_logs.length
+    refute_includes run_logs, File.join(@dir, "runs", "2000-01-01-000000.log")
+  end
+
   def test_exports_the_captured_environment
     environment = { "PATH" => "/usr/bin:/bin", "HOMEBREW_CASK_OPTS" => "--appdir=~/My Apps" }
     script = Autoupdate::Script.updater(config(environment:), **paths)
@@ -147,13 +164,20 @@ class ScriptTest < Minitest::Test
       casks:,
       sudo_askpass:   File.join(@dir, "sudo askpass"),
       notify_command: 'echo "notify $status"',
+      runs:           File.join(@dir, "runs"),
     }
   end
 
+  # Returns the updater's own output followed by the latest run's log.
   def run_updater(config, casks: true, env: {})
     updater = File.join(@dir, "updater")
     write_executable(updater, Autoupdate::Script.updater(config, **paths(casks:)))
-    Open3.capture2e(env, updater)
+    output, status = Open3.capture2e(env, updater)
+    ["#{output}#{run_logs.last&.then { |log| File.read(log) }}", status]
+  end
+
+  def run_logs
+    Dir[File.join(@dir, "runs", "*.log")]
   end
 
   def brew_calls(output)

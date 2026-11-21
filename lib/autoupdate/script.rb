@@ -8,19 +8,26 @@ module Autoupdate
   module Script
     module_function
 
-    def updater(config, brew:, casks:, sudo_askpass:, notify_command:)
+    # How many runs' logs to keep.
+    KEPT_RUNS = 30
+
+    def updater(config, brew:, casks:, sudo_askpass:, notify_command:, runs:)
       <<~SH
         #!/bin/sh
         #{ac_only_check if config.ac_only}
         #{exports(config, sudo_askpass:).join("\n")}
-        run_log=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/brew-autoupdate.XXXXXX") || exit 1
-        trap '/bin/rm -f "$run_log"' EXIT
+        runs=#{Shellwords.escape(runs)}
+        /bin/mkdir -p "$runs" || exit 1
+        # Names sort by time, oldest first.
+        run_log="$runs/$(/bin/date +%Y-%m-%d-%H%M%S).log"
 
-        /bin/date
         (#{commands(config, brew:, casks:).join(" && ")}) >"$run_log" 2>&1
         status=$?
-        /bin/cat "$run_log"
+        echo "$(/bin/date): exit status $status; see $run_log"
         #{notify_command}
+
+        /bin/ls -1r "$runs" | /usr/bin/grep '\\.log$' | /usr/bin/tail -n +#{KEPT_RUNS + 1} |
+          while read -r old; do /bin/rm -f "$runs/$old"; done
         exit "$status"
       SH
     end

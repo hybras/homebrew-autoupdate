@@ -162,6 +162,7 @@ module Autoupdate
                                                    casks:          Autoupdate::Core.casks_installed?,
                                                    sudo_askpass:   sudo_askpass.to_s,
                                                    notify_command: Autoupdate::Notify.command(mode: config.notify),
+                                                   runs:           Autoupdate::Core.runs.to_s,
                                                  ))
 
       write_executable(Pathname(Autoupdate::Launcher.path(location)), Autoupdate::Launcher.script(

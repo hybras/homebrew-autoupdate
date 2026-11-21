@@ -7,7 +7,7 @@ module Homebrew
         subcommand_args do
           usage_banner <<~EOS
             `autoupdate logs` [<options>]:
-            Show output from autoupdate runs.
+            Show the output of the latest autoupdate run.
           EOS
 
           switch "-f", "--follow",
@@ -21,15 +21,16 @@ module Homebrew
           lines = args.lines.blank? ? 10 : Integer(args.lines, exception: false)
           raise UsageError, "`--lines` must be a positive integer." unless lines&.positive?
 
-          log_file = File.join(::Autoupdate::Core.logs, "#{::Autoupdate::Core.name}.out")
-          fallback_log_file = File.join(::Autoupdate::Core.fallback_logs, "#{::Autoupdate::Core.name}.out")
-          file_to_read = [log_file, fallback_log_file].find { |file| File.exist?(file) }
-          if file_to_read.nil?
-            puts "No autoupdate log file found at `#{log_file}` or fallback `#{fallback_log_file}`."
+          runs = ::Autoupdate::Core.runs
+          # Names sort by time.
+          latest = runs.glob("*.log").max
+          if latest.nil?
+            puts "No autoupdate runs have been logged in #{runs} yet."
             return
           end
 
-          system("tail", "-n", lines.to_s, *("-f" if args.follow?), file_to_read)
+          ohai latest
+          system("tail", "-n", lines.to_s, *("-f" if args.follow?), latest.to_s)
         end
       end
     end

@@ -29,6 +29,11 @@ module Autoupdate
       File.expand_path("~/Library/Logs/#{name}")
     end
 
+    # One log file per scheduled run.
+    def runs
+      Pathname(logs)/"runs"
+    end
+
     def fallback_logs
       File.expand_path("..", logs)
     end
