@@ -2,12 +2,10 @@
 
 require "minitest/autorun"
 require "digest"
-require "json"
 require "fileutils"
 require "open3"
 require "tempfile"
 require "tmpdir"
-require_relative "../lib/autoupdate/launcher"
 
 class AppTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__).freeze
@@ -140,15 +138,12 @@ class AppTest < Minitest::Test
     assert_includes output, "Warning: could not display the update result."
   end
 
-  def test_built_app_is_universal_and_can_run_the_updater
+  def test_built_app_is_universal
     app = ENV.fetch("BREW_AUTOUPDATE_APP") { skip "set BREW_AUTOUPDATE_APP to an app built by app/build.sh" }
     executable = File.join(app, "Contents/MacOS/brew-autoupdate")
     architectures, = Open3.capture2("/usr/bin/lipo", "-archs", executable)
-    capabilities, = Open3.capture2("/usr/bin/plutil", "-extract", "BrewAutoupdateCapabilities", "json",
-                                   "-o", "-", File.join(app, "Contents/Info.plist"))
 
     assert_equal %w[arm64 x86_64], architectures.split.sort
-    assert_includes JSON.parse(capabilities), Autoupdate::Launcher::CAPABILITY
   end
 
   def test_built_executable_rejects_invalid_arguments

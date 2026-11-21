@@ -29,6 +29,7 @@ func fail(_ message: String) -> Never {
   exit(1)
 }
 
+@MainActor
 func notify(title: String, subtitle: String, message: String) {
   let application = NSApplication.shared
   application.setActivationPolicy(.accessory)
@@ -80,13 +81,15 @@ func requireOwnedByUser(_ path: String, type: FileAttributeType) {
   }
 }
 
+@MainActor
 func runUpdater(log: String, launcherPID: pid_t) {
   // The script path is fixed so the app cannot be used to run arbitrary
   // programs with its permissions.
   guard let home = getpwuid(getuid())?.pointee.pw_dir else {
     fail("could not determine the home directory")
   }
-  let supportDirectory = "\(String(cString: home))/Library/Application Support/com.github.hybras.homebrew-autoupdate"
+  let supportDirectory =
+    "\(String(cString: home))/Library/Application Support/com.github.hybras.homebrew-autoupdate"
   let updater = "\(supportDirectory)/brew_autoupdate"
   requireOwnedByUser(supportDirectory, type: .typeDirectory)
   requireOwnedByUser(updater, type: .typeRegular)
@@ -107,8 +110,10 @@ func runUpdater(log: String, launcherPID: pid_t) {
   updaterProcess.standardOutput = logHandle
   updaterProcess.standardError = logHandle
   updaterProcess.terminationHandler = { process in
-    let status = process.terminationStatus + (process.terminationReason == .uncaughtSignal ? 128 : 0)
-    try? "\(status)\n".write(toFile: "\(supportDirectory)/brew_autoupdate.status", atomically: true, encoding: .utf8)
+    let status =
+      process.terminationStatus + (process.terminationReason == .uncaughtSignal ? 128 : 0)
+    try? "\(status)\n".write(
+      toFile: "\(supportDirectory)/brew_autoupdate.status", atomically: true, encoding: .utf8)
     exit(status)
   }
 
@@ -125,10 +130,11 @@ func runUpdater(log: String, launcherPID: pid_t) {
   signal(SIGTERM, SIG_IGN)
   let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
   terminationSource.setEventHandler(handler: stopUpdater)
-  let launcherSource = DispatchSource.makeProcessSource(identifier: launcherPID, eventMask: .exit, queue: .main)
+  let launcherSource = DispatchSource.makeProcessSource(
+    identifier: launcherPID, eventMask: .exit, queue: .main)
   launcherSource.setEventHandler(handler: stopUpdater)
   dispatchSources = [terminationSource, launcherSource]
-  dispatchSources.forEach { $0.resume() }
+  for source in dispatchSources { source.resume() }
 
   if kill(launcherPID, 0) != 0 {
     stopUpdater()
@@ -146,8 +152,9 @@ case ("run-updater", 3):
   }
   runUpdater(log: arguments[1], launcherPID: launcherPID)
 default:
-  fail("usage: brew-autoupdate notify <title> <subtitle> <message>\n" +
-       "       brew-autoupdate run-updater <log> <launcher-pid>")
+  fail(
+    "usage: brew-autoupdate notify <title> <subtitle> <message>\n"
+      + "       brew-autoupdate run-updater <log> <launcher-pid>")
 }
 
 RunLoop.main.run()

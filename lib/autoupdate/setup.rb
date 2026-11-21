@@ -179,7 +179,6 @@ module Autoupdate
       end
 
       return if !config.upgrade || !Autoupdate::Core.casks_installed?
-      return unless Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Core.app.to_s)
 
       puts <<~EOS
 

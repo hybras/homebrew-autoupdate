@@ -1,17 +1,17 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 6.0
 
 import PackageDescription
 
 let package = Package(
   name: "homebrew-autoupdate",
   platforms: [
-    .macOS(.v11),
+    .macOS(.v15)
   ],
   products: [
     .executable(
       name: "brew-autoupdate",
       targets: ["BrewAutoupdate"]
-    ),
+    )
   ],
   targets: [
     .executableTarget(
@@ -25,6 +25,6 @@ let package = Package(
         "notify-result.sh",
       ],
       sources: ["BrewAutoupdate.swift"]
-    ),
+    )
   ]
 )

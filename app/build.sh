@@ -32,13 +32,13 @@ then
 fi
 
 /bin/mkdir -p "${build_app}/Contents/MacOS" "${build_app}/Contents/Resources"
-/usr/bin/xcrun --sdk macosx swiftc -swift-version 5 \
+/usr/bin/xcrun --sdk macosx swiftc -swift-version 6 \
   -module-cache-path "${build_dir}/module-cache" \
-  -target arm64-apple-macos11.0 "${source_file}" \
+  -target arm64-apple-macos15.0 "${source_file}" \
   -o "${build_dir}/${executable_name}-arm64"
-/usr/bin/xcrun --sdk macosx swiftc -swift-version 5 \
+/usr/bin/xcrun --sdk macosx swiftc -swift-version 6 \
   -module-cache-path "${build_dir}/module-cache" \
-  -target x86_64-apple-macos11.0 "${source_file}" \
+  -target x86_64-apple-macos15.0 "${source_file}" \
   -o "${build_dir}/${executable_name}-x86_64"
 /usr/bin/lipo -create \
   "${build_dir}/${executable_name}-arm64" \
@@ -56,12 +56,8 @@ fi
 /usr/bin/plutil -insert CFBundleShortVersionString -string "${version}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleVersion -string "${version}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleIconFile -string "applet" "${build_app}/Contents/Info.plist"
-/usr/bin/plutil -insert LSMinimumSystemVersion -string "11.0" "${build_app}/Contents/Info.plist"
+/usr/bin/plutil -insert LSMinimumSystemVersion -string "15.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSUIElement -bool true "${build_app}/Contents/Info.plist"
-# The generated launcher checks this before opening the app in updater mode,
-# so an app is never asked to run the updater with arguments it does not
-# accept. See Autoupdate::Launcher::CAPABILITY.
-/usr/bin/plutil -insert BrewAutoupdateCapabilities -json '["run-updater-1"]' "${build_app}/Contents/Info.plist"
 
 # Lets CI check that the committed app was built from the current sources.
 /bin/cat "${source_file}" "${script_dir}/build.sh" >"${build_dir}/sources"
