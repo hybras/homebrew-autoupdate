@@ -20,6 +20,8 @@ module Autoupdate
         /bin/mkdir -p "$runs" || exit 1
         # Names sort by time, oldest first.
         run_log="$runs/$(/bin/date +%Y-%m-%d-%H%M%S).log"
+        # What the run is about to upgrade, for the notification.
+        outdated="${run_log%.log}.outdated.json"
 
         (#{commands(config, brew:, casks:).join(" && ")}) >"$run_log" 2>&1
         status=$?
@@ -27,7 +29,7 @@ module Autoupdate
         #{notify_command}
 
         /bin/ls -1r "$runs" | /usr/bin/grep '\\.log$' | /usr/bin/tail -n +#{KEPT_RUNS + 1} |
-          while read -r old; do /bin/rm -f "$runs/$old"; done
+          while read -r old; do /bin/rm -f "$runs/$old" "$runs/${old%.log}.outdated.json"; done
         exit "$status"
       SH
     end
@@ -37,15 +39,20 @@ module Autoupdate
       commands = ["#{brew} update"]
 
       if config.upgrade
+        # `brew outdated` exits 1 when named packages are outdated, which is
+        # not a failure here.
+        outdated = ->(scope) { "{ #{brew} outdated --json=v2#{scope} >\"$outdated\" || :; }" }
         commands << if config.leaves_only
           # Formula names contain no whitespace, so `$leaves` is split on purpose.
           "leaves=$(#{brew} leaves) && if [ -n \"$leaves\" ]; then " \
+            "#{outdated.call(" --formula $leaves")} && " \
             "#{brew} upgrade --no-ask --formula -v $leaves; " \
             "else echo \"No leaves packages to upgrade.\"; fi"
         elsif config.only
-          "#{brew} upgrade --no-ask -v#{greedy} #{config.only.join(" ")}"
+          "#{outdated.call("#{greedy} #{config.only.join(" ")}")} && " \
+            "#{brew} upgrade --no-ask -v#{greedy} #{config.only.join(" ")}"
         else
-          "#{brew} upgrade --no-ask --formula -v"
+          "#{outdated.call(casks ? greedy : " --formula")} && #{brew} upgrade --no-ask --formula -v"
         end
         commands << "#{brew} upgrade --no-ask --cask -v#{greedy}" if !config.only && casks
       end

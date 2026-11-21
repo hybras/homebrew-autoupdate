@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "fileutils"
+require "json"
 require "open3"
 require "tempfile"
 require "tmpdir"
@@ -19,11 +20,23 @@ class AppTest < Minitest::Test
     assert_includes output, "Homebrew is already up-to-date."
   end
 
-  def test_reports_an_upgrade_count
-    output, status = summarize(0, "==> Upgrading 3 outdated packages:\nfoo\nbar\n")
+  def test_lists_the_upgraded_packages_and_versions
+    outdated = {
+      formulae: [
+        { name: "wget", installed_versions: ["1.24"], current_version: "1.25", pinned: false },
+        { name: "node", installed_versions: ["22.1"], current_version: "22.2", pinned: true },
+      ],
+      casks:    [{ name: "firefox", installed_versions: ["140.0"], current_version: "141.0" }],
+    }
+    output, = summarize(0, "Already up-to-date.\n", outdated:)
 
-    assert_predicate status, :success?
-    assert_includes output, "==> Upgrading 3 outdated packages:"
+    assert_includes output, "Upgraded wget 1.24 → 1.25, firefox 140.0 → 141.0"
+  end
+
+  def test_reports_when_nothing_needed_upgrading
+    output, = summarize(0, "Already up-to-date.\n", outdated: { formulae: [], casks: [] })
+
+    assert_includes output, "Nothing needed upgrading."
   end
 
   def test_reports_a_generic_success
@@ -122,15 +135,16 @@ class AppTest < Minitest::Test
     output.strip
   end
 
-  def summarize(exit_status, contents, mode: "always")
-    Tempfile.create("autoupdate-notify") do |log|
-      log.write(contents)
-      log.flush
+  def summarize(exit_status, contents, mode: "always", outdated: nil)
+    Dir.mktmpdir("autoupdate-notify") do |dir|
+      log = File.join(dir, "run.log")
+      File.write(log, contents)
+      File.write(File.join(dir, "run.outdated.json"), JSON.generate(outdated)) if outdated
       stdout, stderr, status = Open3.capture3(
         { "AUTOUPDATE_NOTIFY_PRINT" => "1" },
         SCRIPT,
         exit_status.to_s,
-        log.path,
+        log,
         mode,
       )
       ["#{stdout}#{stderr}", status]

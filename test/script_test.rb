@@ -19,6 +19,8 @@ class ScriptTest < Minitest::Test
       echo "brew $*" >&2
       [ "$1" = leaves ] && printf 'wget\\ngit\\n'
       [ "$1" = upgrade ] && [ -n "${FAIL_UPGRADE:-}" ] && exit 2
+      # Like `brew outdated <names>` when something is outdated.
+      [ "$1" = outdated ] && echo '{"formulae":[],"casks":[]}' && exit 1
       exit 0
     SH
   end
@@ -39,6 +41,7 @@ class ScriptTest < Minitest::Test
 
     assert_equal [
       "brew update",
+      "brew outdated --json=v2 --greedy",
       "brew upgrade --no-ask --formula -v",
       "brew upgrade --no-ask --cask -v --greedy",
       "brew cleanup",
@@ -48,20 +51,30 @@ class ScriptTest < Minitest::Test
   def test_casks_are_skipped_when_none_are_installed
     output, = run_updater(config(upgrade: true), casks: false)
 
-    assert_equal ["brew update", "brew upgrade --no-ask --formula -v"], brew_calls(output)
+    assert_equal ["brew update", "brew outdated --json=v2 --formula", "brew upgrade --no-ask --formula -v"],
+                 brew_calls(output)
   end
 
   def test_only_upgrades_the_listed_packages
     output, = run_updater(config(upgrade: true, greedy: true, only: %w[wget firefox]))
 
-    assert_equal ["brew update", "brew upgrade --no-ask -v --greedy wget firefox"], brew_calls(output)
+    assert_equal ["brew update", "brew outdated --json=v2 --greedy wget firefox",
+                  "brew upgrade --no-ask -v --greedy wget firefox"], brew_calls(output)
   end
 
   def test_leaves_only_upgrades_top_level_formulae
     output, status = run_updater(config(upgrade: true, leaves_only: true), casks: false)
 
     assert_predicate status, :success?
-    assert_equal ["brew update", "brew leaves", "brew upgrade --no-ask --formula -v wget git"], brew_calls(output)
+    assert_equal ["brew update", "brew leaves", "brew outdated --json=v2 --formula wget git",
+                  "brew upgrade --no-ask --formula -v wget git"], brew_calls(output)
+  end
+
+  def test_outdated_packages_do_not_stop_the_run
+    output, status = run_updater(config(upgrade: true, only: %w[wget]))
+
+    assert_predicate status, :success?
+    assert_includes brew_calls(output), "brew upgrade --no-ask -v wget"
   end
 
   def test_leaves_only_reports_failed_upgrades
@@ -76,7 +89,7 @@ class ScriptTest < Minitest::Test
     output, status = run_updater(config(upgrade: true, cleanup: true), env: { "FAIL_UPGRADE" => "1" })
 
     assert_equal 2, status.exitstatus
-    assert_equal ["brew update", "brew upgrade --no-ask --formula -v"], brew_calls(output)
+    assert_equal ["brew update", "brew outdated --json=v2", "brew upgrade --no-ask --formula -v"], brew_calls(output)
     assert_includes output, "notify 2"
   end
 

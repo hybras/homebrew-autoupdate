@@ -17,20 +17,21 @@ then
   title="Homebrew autoupdate completed"
   subtitle="brew-autoupdate"
 
-  if /usr/bin/grep -q "Already up-to-date." "${run_log}"
+  # Written by the updater before upgrading; the run stops at the first
+  # failure, so after a success it lists what was upgraded.
+  outdated="${run_log%.log}.outdated.json"
+
+  summary='[.formulae[], .casks[]] | map(select(.pinned != true))
+    | map("\(.name) \(.installed_versions[-1]) → \(.current_version)") | join(", ")'
+
+  if [[ -s "${outdated}" ]] && upgraded=$(/usr/bin/jq -r "${summary}" "${outdated}")
+  then
+    message=${upgraded:+"Upgraded ${upgraded}"}
+    message=${message:-"Nothing needed upgrading."}
+  elif /usr/bin/grep -q "Already up-to-date." "${run_log}"
   then
     message="Homebrew is already up-to-date."
   else
-    upgrade_line=$(
-      /usr/bin/awk '/==> Upgrading [0-9]+ outdated packages?:/ { line = $0 } END { print line }' "${run_log}"
-    )
-  fi
-
-  if [[ -n "${upgrade_line:-}" ]]
-  then
-    message=${upgrade_line}
-  elif [[ -z "${message:-}" ]]
-  then
     message="Homebrew was updated successfully."
   fi
 else
