@@ -1,75 +1,50 @@
 # frozen_string_literal: true
 
-require "plist"
+module Homebrew
+  module Cmd
+    class Autoupdate < AbstractCommand
+      class StatusSubcommand < AbstractSubcommand
+        subcommand_args do
+          usage_banner <<~EOS
+            `autoupdate status`:
+            Show whether autoupdate is running and describe its installed configuration.
+          EOS
+          named_args :none
+        end
 
-module Autoupdate
-  module_function
+        def run
+          running = ::Autoupdate::Launchd.loaded?
+          config_file = ::Autoupdate::Core.config_file
 
-  def status
-    running = Autoupdate::Launchd.loaded?
-    updater = Autoupdate::Core.updater
-    # The configuration is saved on every start; older setups only have the
-    # updater script, which they never rewrote.
-    started = [Autoupdate::Core.config_file, updater].find(&:exist?)
-
-    if running || started
-      puts "Autoupdate is installed and #{running ? "running" : "stopped"}."
-      puts
-      puts "Last started: #{started ? started.mtime.strftime("%F") : "unknown"}"
-      puts configuration_summary
-      puts
-      puts outdated_message if started && (Date.today - started.mtime.to_date).to_i >= 90
-    elsif !File.exist?(Autoupdate::Core.plist)
-      puts "Autoupdate is not configured. Use `brew autoupdate start` to begin."
-    else
-      puts <<~EOS
-        Autoupdate cannot determine its status.
-        Please feel free to file an issue with further information here:
-        https://github.com/hybras/homebrew-autoupdate/issues
-      EOS
-    end
-  end
-
-  def configuration_summary
-    plist = File.exist?(Autoupdate::Core.plist) ? Plist.parse_xml(Autoupdate::Core.plist, marshal: false) : {}
-    details = if Autoupdate::Core.config_file.exist?
-      Autoupdate::Config.load(Autoupdate::Core.config_file).summary(casks: casks_installed?)
-    else
-      ["Options: not saved by the version of `brew autoupdate` that started it"]
-    end
-    details << "Runs via: #{launch_mode(plist)}"
-    details << "Logs: #{plist["StandardOutPath"]}" if plist["StandardOutPath"]
-    details.join("\n")
-  rescue JSON::ParserError, ArgumentError => e
-    "Configuration: unable to read #{Autoupdate::Core.config_file} (#{e.message})"
-  end
-
-  def outdated_message
-    if Autoupdate::Core.config_file.exist?
-      <<~EOS
-        The updater script was generated more than 90 days ago. Run
-        `brew autoupdate stop` and then `brew autoupdate start` to regenerate it
-        with the latest improvements; your options are kept.
-      EOS
-    else
-      <<~EOS
-        This setup was created by an older version of `brew autoupdate`. Run
-        `brew autoupdate delete` and then `brew autoupdate start` with your
-        options to enable the latest features.
-      EOS
-    end
-  end
-
-  def launch_mode(plist)
-    unless plist["Program"].to_s.end_with?("/#{Autoupdate::Launcher::SCRIPT_NAME}")
-      return "updater script (legacy; run `brew autoupdate stop` then `start` " \
-             "to run through brew-autoupdate.app)"
-    end
-
-    if Autoupdate::Launcher.app_supports_run_updater?(Autoupdate::Core.app.to_s)
-      "brew-autoupdate.app (grant it App Management to upgrade cask apps in place)"
-    else
-      "updater script (the installed brew-autoupdate.app cannot run updates)"
+          if config_file.exist?
+            puts "Autoupdate is installed and #{running ? "running" : "stopped"}."
+            puts
+            puts "Last started: #{config_file.mtime.strftime("%F")}"
+            begin
+              puts ::Autoupdate::Config.load(config_file).summary(casks: ::Autoupdate::Core.casks_installed?)
+            rescue JSON::ParserError, ArgumentError => e
+              puts "Configuration: unable to read #{config_file} (#{e.message})"
+            end
+            puts "Logs: #{::Autoupdate::Core.logs}"
+            if (Date.today - config_file.mtime.to_date).to_i >= 90
+              puts
+              puts <<~EOS
+                The updater script was generated more than 90 days ago. Run
+                `brew autoupdate restart` to regenerate it with the latest
+                improvements; your options are kept.
+              EOS
+            end
+          elsif running || File.exist?(::Autoupdate::Core.plist)
+            puts <<~EOS
+              Autoupdate cannot determine its status.
+              Please feel free to file an issue with further information here:
+              https://github.com/hybras/homebrew-autoupdate/issues
+            EOS
+          else
+            puts "Autoupdate is not configured. Use `brew autoupdate start` to begin."
+          end
+        end
+      end
     end
   end
 end

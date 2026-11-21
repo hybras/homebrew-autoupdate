@@ -108,11 +108,18 @@ class CommandTest < Minitest::Test
     assert_includes output, "`--lines` must be a positive integer."
   end
 
-  def test_legacy_subcommand_switches_remain_supported
-    stdout, stderr, status = brew_autoupdate("--status")
+  def test_legacy_subcommand_switches_are_gone
+    output, status = brew_autoupdate_error("--status")
+
+    refute_predicate status, :success?
+    assert_includes output, "invalid option: --status"
+  end
+
+  def test_root_help_lists_restart
+    stdout, stderr, status = brew_autoupdate("--help")
 
     assert_predicate status, :success?, stderr
-    assert_match(/Autoupdate is (?:installed|not configured)/, stdout)
+    assert_includes stdout, "restart:"
   end
 
   def test_version_uses_the_shared_version_file

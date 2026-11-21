@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "pathname"
-
 module Autoupdate
   module Core
     module_function
@@ -21,6 +19,10 @@ module Autoupdate
 
     def brew
       HOMEBREW_PREFIX/"bin/brew"
+    end
+
+    def casks_installed?
+      (HOMEBREW_PREFIX/"Caskroom").exist?
     end
 
     def logs
