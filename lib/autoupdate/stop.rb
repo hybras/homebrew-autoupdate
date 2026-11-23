@@ -1,22 +1,24 @@
 # frozen_string_literal: true
 
-require "system_command"
+module Homebrew
+  module Cmd
+    class Autoupdate < AbstractCommand
+      class StopSubcommand < AbstractSubcommand
+        subcommand_args do
+          usage_banner <<~EOS
+            `autoupdate stop`:
+            Stop autoupdating while retaining the launch agent, configuration, and logs.
+          EOS
+          named_args :none
+        end
 
-module Autoupdate
-  module_function
+        def run
+          odie "Autoupdate is not currently running; cannot stop a command that is not running." unless ::Autoupdate::Launchd.loaded?
 
-  def check_is_not_already_stopped
-    return if Utils.popen_read("/bin/launchctl", "list").include?(Autoupdate::Core.name)
-
-    odie <<~EOS
-      Autoupdate is not currently running; cannot stop a command that is not running.
-    EOS
-  end
-
-  def stop
-    check_is_not_already_stopped
-
-    SystemCommand.quiet_system "/bin/launchctl", "unload", Autoupdate::Core.plist
-    puts "Homebrew will no longer autoupdate."
+          ::Autoupdate::Launchd.unload
+          puts "Homebrew will no longer autoupdate."
+        end
+      end
+    end
   end
 end

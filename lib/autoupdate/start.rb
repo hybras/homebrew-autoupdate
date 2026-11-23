@@ -1,304 +1,75 @@
-# frozen_string_literal: false
+# frozen_string_literal: true
 
-require "cgi"
-require "shellwords"
-require "system_command"
-require "utils/output"
+module Homebrew
+  module Cmd
+    class Autoupdate < AbstractCommand
+      class StartSubcommand < AbstractSubcommand
+        # Options other than the interval. Without any of them, `start` after
+        # `stop` reuses the saved options.
+        SWITCHES = %w[upgrade greedy cleanup immediate sudo leaves_only ac_only notify_on_error no_notify].freeze
 
-module Autoupdate
-  extend Utils::Output::Mixin
-
-  module_function
-
-  def start(interval:, args:)
-    # Method from Homebrew.
-    # https://github.com/Homebrew/brew/blob/c9c7f4/Library/Homebrew/utils/popen.rb
-    if Utils.popen_read("/bin/launchctl", "list").include?(Autoupdate::Core.name)
-      odie <<~EOS
-        The command already appears to have been started.
-        Please run `brew autoupdate delete` and try again.
-      EOS
-    end
-
-    # Validate --only package names to prevent shell injection
-    if args.only
-      odie "`--only` requires at least one package name." if args.only.empty?
-
-      invalid_names = args.only.grep_v(%r{\A[a-zA-Z0-9\-_.@/]+\z})
-      if invalid_names.any?
-        odie <<~EOS
-          Invalid package name(s): #{invalid_names.join(", ")}
-          Package names may only contain letters, digits, hyphens, underscores, dots, @ signs, and slashes.
-        EOS
-      end
-    end
-
-    auto_args = "update"
-    # Spacing at start of lines is deliberate. Don't undo.
-    if args.upgrade?
-      if args.leaves_only?
-        # For --leaves-only, we need to get the list of leaves and upgrade only those
-        # We create a temporary script to handle this safely
-        temp_script = <<~SCRIPT
-          #!/bin/bash
-          set -e
-          LEAVES=$(#{Autoupdate::Core.brew} leaves)
-          if [ -n "$LEAVES" ]; then
-            echo "Upgrading leaves packages only..."
-            #{Autoupdate::Core.brew} upgrade --no-ask --formula -v $(echo "$LEAVES") || {
-              echo "Warning: Some leaves packages failed to upgrade."
-              # Return 0 to ensure the autoupdate process continues
-              exit 0
-            }
-          else
-            echo "No leaves packages to upgrade."
-          fi
-        SCRIPT
-
-        # Create a temporary script file
-        script_path = Autoupdate::Core.location/"brew_autoupdate_leaves"
-        # Ensure the directory exists
-        FileUtils.mkpath(Autoupdate::Core.location)
-        script_path.unlink if script_path.exist? # Remove existing script if it exists to prevent error on recreation.
-        File.open(script_path, "w") { |f| f << temp_script }
-        FileUtils.chmod 0555, script_path
-
-        # Add the script to the auto_args
-        # Use quotes around the script path to handle spaces
-        auto_args << " && \"#{script_path}\""
-      elsif args.only
-        greedy = args.greedy? ? " --greedy" : ""
-        package_list = args.only.join(" ")
-        auto_args << " && #{Autoupdate::Core.brew} upgrade --no-ask -v#{greedy} #{package_list}"
-      else
-        auto_args << " && #{Autoupdate::Core.brew} upgrade --no-ask --formula -v"
-      end
-
-      if !args.only && (HOMEBREW_PREFIX/"Caskroom").exist?
-        if ENV["SUDO_ASKPASS"].nil? && !args.sudo?
-          opoo <<~EOS
-            Please note if you use Casks that require `sudo` to upgrade,
-            you need to use `--sudo` or define a custom `SUDO_ASKPASS`
-            environment variable.
-
+        subcommand_args do
+          usage_banner <<~EOS
+            `autoupdate start` [<interval>] [<options>]:
+            Start autoupdating in the background.
+            The interval defaults to 24 hours and accepts seconds or a suffix such as
+            `30m`, `12h`, or `1d`, or a 24-hour clock time such as `00:00` to run daily
+            at that specific time.
+            After `stop`, running `start` with no interval or options resumes with the
+            saved options; otherwise the given ones replace them.
           EOS
+
+          switch "--upgrade",
+                 description: "Automatically upgrade installed formulae and casks."
+          switch "--greedy",
+                 depends_on:  "--upgrade",
+                 description: "Include auto-updating casks when upgrading."
+          switch "--cleanup",
+                 description: "Automatically clean Homebrew's cache and logs."
+          switch "--immediate",
+                 description: "Run immediately and on login instead of waiting for the first interval."
+          switch "--sudo",
+                 depends_on:  "--upgrade",
+                 description: "Open a GUI password prompt when a cask upgrade requires `sudo`. " \
+                              "Requires `pinentry-mac` to be installed."
+          switch "--leaves-only",
+                 depends_on:  "--upgrade",
+                 description: "Upgrade only top-level formulae that are not dependencies."
+          comma_array "--only=",
+                      description: "Upgrade only these formulae and/or casks (comma-separated). " \
+                                   "Requires `--upgrade`."
+          switch "--ac-only",
+                 description: "Run only while the Mac is connected to AC power."
+          switch "--notify-on-error",
+                 description: "Notify only when an autoupdate run fails."
+          switch "--no-notify",
+                 description: "Disable autoupdate notifications."
+
+          conflicts "--only", "--leaves-only"
+          conflicts "--notify-on-error", "--no-notify"
+          named_args max: 1
         end
 
-        greedy = args.greedy? ? " --greedy" : ""
-        auto_args << " && #{Autoupdate::Core.brew} upgrade --no-ask --cask -v#{greedy}"
-      end
+        def run
+          raise UsageError, "`--only` cannot be passed without `--upgrade`." if args.only && !args.upgrade?
 
-    end
-    auto_args << " && #{Autoupdate::Core.brew} cleanup" if args.cleanup?
+          interval = begin
+            ::Autoupdate::Interval.parse(args.named.first)
+          rescue ::Autoupdate::Interval::InvalidIntervalError => e
+            raise UsageError, e.message
+          end
 
-    # Try to respect user choice as much as possible.
-    env_cache = ENV.fetch("HOMEBREW_CACHE") if ENV["HOMEBREW_CACHE"]
-    env_logs = ENV.fetch("HOMEBREW_LOGS") if ENV["HOMEBREW_LOGS"]
-    env_dev = ENV.fetch("HOMEBREW_DEVELOPER") if ENV["HOMEBREW_DEVELOPER"]
-    env_stats = ENV.fetch("HOMEBREW_NO_ANALYTICS") if ENV["HOMEBREW_NO_ANALYTICS"]
-    env_cask = ENV.fetch("HOMEBREW_CASK_OPTS") if ENV["HOMEBREW_CASK_OPTS"]
-    env_sudo = ENV.fetch("SUDO_ASKPASS") if ENV["SUDO_ASKPASS"]
-    env_path = ENV.fetch("PATH")
-
-    # We don't want a background task ramping up the user's CPU to build things
-    # from source, especially since it'll be non-obvious why the CPU is
-    # suddenly being worked hard.
-    set_env = "export HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK=1"
-
-    set_env << "\n#{shell_export("PATH", env_path)}"
-    set_env << "\n#{shell_export("HOMEBREW_CACHE", env_cache)}" if env_cache
-    set_env << "\n#{shell_export("HOMEBREW_LOGS", env_logs)}" if env_logs
-    set_env << "\n#{shell_export("HOMEBREW_DEVELOPER", env_dev)}" if env_dev
-    set_env << "\n#{shell_export("HOMEBREW_NO_ANALYTICS", env_stats)}" if env_stats
-    set_env << "\n#{shell_export("HOMEBREW_CASK_OPTS", env_cask)}" if env_cask
-
-    if args.sudo?
-      unless Utils::Path.formula_any_version_installed?("pinentry-mac")
-        odie <<~EOS
-          `--sudo` requires https://formulae.brew.sh/formula/pinentry-mac to be installed.
-          Please run `brew install pinentry-mac` and try again.
-        EOS
-      end
-      set_env << "\nexport SUDO_ASKPASS='#{Autoupdate::Core.location/"brew_autoupdate_sudo_gui"}'"
-      sudo_gui_script_contents = <<~EOS
-        #!/bin/sh
-        PATH="#{HOMEBREW_PREFIX}/bin"
-        (
-          export PINENTRY_USER_DATA="ICON=#{Autoupdate::Core.location/"notifier/applet.icns"},"
-          printf '%s\\n' \\
-            "OPTION allow-external-cache" \\
-            "SETOK OK" \\
-            "SETCANCEL Cancel" \\
-            "SETDESC homebrew-autoupdate needs your admin password to complete the upgrade" \\
-            "SETPROMPT Enter Password:" \\
-            "SETTITLE homebrew-autoupdate Password Request" \\
-            "GETPIN" \\
-            | pinentry-mac --no-global-grab --timeout 60
-        ) | /usr/bin/awk '/^D / {gsub(/%25/, "%"); print substr($0, 3)}'
-      EOS
-    elsif env_sudo
-      set_env << "\n#{shell_export("SUDO_ASKPASS", env_sudo)}"
-    end
-
-    ac_only = if args.ac_only?
-      <<~EOS
-        if ! output=$(LC_ALL=C /usr/bin/pmset -g ps 2>/dev/null); then
-          echo "Warning: Unable to determine power source; proceeding anyway" >&2
-        elif ! echo "$output" | /usr/bin/grep --quiet "'AC Power'"; then
-          echo "Skipping homebrew-autoupdate: device not on AC power" >&2
-          exit
-        fi
-      EOS
-    else
-      ""
-    end
-
-    notify_mode = if args.no_notify? || MacOS.version < :catalina
-      "never"
-    elsif args.notify_on_error?
-      "error"
-    else
-      "always"
-    end
-
-    script_contents = <<~EOS
-      #!/bin/sh
-      #{ac_only.chomp}
-      #{set_env}
-      run_log=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/brew-autoupdate.XXXXXX") || exit 1
-      trap '/bin/rm -f "$run_log"' EXIT
-
-      /bin/date
-      (#{Autoupdate::Core.brew} #{auto_args}) >"$run_log" 2>&1
-      status=$?
-      /bin/cat "$run_log"
-      #{Autoupdate::Notify.command(mode: notify_mode)}
-      exit "$status"
-    EOS
-    FileUtils.mkpath(Autoupdate::Core.logs)
-    FileUtils.mkpath(Autoupdate::Core.location)
-
-    # It's not something I particularly support but if someone manually loads
-    # the plist with launchctl themselves we can end up with a log directory
-    # we can't write to later, so need to ensure a future `start` command
-    # doesn't silently fail.
-    if File.writable?(Autoupdate::Core.logs)
-      log_out = "#{Autoupdate::Core.logs}/#{Autoupdate::Core.name}.out"
-    elsif File.writable?(Autoupdate::Core.fallback_logs)
-      log_out = "#{Autoupdate::Core.fallback_logs}/#{Autoupdate::Core.name}.out"
-    else
-      odie <<~EOS
-        #{Autoupdate::Core.logs} does not seem to be writable.
-        You may wish to `chown` it back to your user.
-      EOS
-    end
-
-    # Security tools like "Little Snitch" only display the executable name by
-    # default, which makes this generic name a little worrying without context.
-    # Rename the old script to the new script name, which should provide more
-    # clarity to users who run systems with tools like LS installed.
-    if File.exist?(Autoupdate::Core.location/"updater")
-      FileUtils.cp Autoupdate::Core.location/"updater", Autoupdate::Core.location/"brew_autoupdate"
-    end
-
-    # If someone has previously stopped the command assume when they start
-    # it again they'd want to keep the same options & don't replace the script.
-    # If you want to tweak prior-provided options the expected way is with the
-    # delete command followed by the start command with new args.
-    unless File.exist?(Autoupdate::Core.location/"brew_autoupdate")
-      File.open(Autoupdate::Core.location/"brew_autoupdate", "w") { |sc| sc << script_contents }
-      FileUtils.chmod 0555, Autoupdate::Core.location/"brew_autoupdate"
-    end
-
-    if args.sudo?
-      sudo_gui_script = Autoupdate::Core.location/"brew_autoupdate_sudo_gui"
-      if !sudo_gui_script.exist? || sudo_gui_script.read != sudo_gui_script_contents
-        sudo_gui_script.atomic_write(sudo_gui_script_contents)
-        FileUtils.chmod 0555, sudo_gui_script
+          config_file = ::Autoupdate::Core.config_file
+          options_given = args.named.any? || args.only || SWITCHES.any? { |switch| args.public_send(:"#{switch}?") }
+          config = if options_given || !config_file.exist?
+            ::Autoupdate::Setup.config_from_args(interval:, args:)
+          else
+            ohai "Reusing the options saved by the previous `brew autoupdate start`."
+            ::Autoupdate::Config.load(config_file)
+          end
+          ::Autoupdate::Setup.start(config)
+        end
       end
     end
-
-    # This restores the "Run At Load" key removed in a7de771abcf6 when requested.
-    launch_immediately = if args.immediate?
-      <<~EOS
-        <key>RunAtLoad</key>
-          <true/>
-      EOS
-    else
-      ""
-    end
-
-    # A CalendarTime schedules a fixed wall-clock time daily via
-    # StartCalendarInterval; anything else is a relative StartInterval,
-    # measured in seconds from whenever launchd loads the job.
-    schedule_xml = if interval.is_a?(Autoupdate::Interval::CalendarTime)
-      <<~EOS.chomp
-        <key>StartCalendarInterval</key>
-        <dict>
-          <key>Hour</key>
-          <integer>#{interval.hour}</integer>
-          <key>Minute</key>
-          <integer>#{interval.minute}</integer>
-        </dict>
-      EOS
-    else
-      <<~EOS.chomp
-        <key>StartInterval</key>
-        <integer>#{interval}</integer>
-      EOS
-    end
-
-    file = <<~EOS
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>Label</key>
-        <string>#{CGI.escapeHTML(Autoupdate::Core.name)}</string>
-        <key>Program</key>
-        <string>#{CGI.escapeHTML("#{Autoupdate::Core.location}/brew_autoupdate")}</string>
-        <key>ProgramArguments</key>
-        <array>
-            <string>#{CGI.escapeHTML("#{Autoupdate::Core.location}/brew_autoupdate")}</string>
-        </array>
-        #{launch_immediately.chomp}
-        <key>StandardErrorPath</key>
-        <string>#{CGI.escapeHTML(log_out)}</string>
-        <key>StandardOutPath</key>
-        <string>#{CGI.escapeHTML(log_out)}</string>
-        #{schedule_xml}
-        <key>LowPriorityBackgroundIO</key>
-        <true/>
-        <key>LowPriorityIO</key>
-        <true/>
-        <key>ProcessType</key>
-        <string>Background</string>
-      </dict>
-      </plist>
-    EOS
-
-    # https://github.com/Homebrew/homebrew-autoupdate/issues/10
-    user_la = Pathname.new(Autoupdate::Core.plist).dirname
-    unless user_la.exist?
-      odie <<~EOS
-        #{user_la} does not exist. Please create it first:
-          mkdir -p #{user_la}
-        You may need to use `sudo`.
-      EOS
-    end
-
-    File.open(Autoupdate::Core.plist, "w") { |f| f << file }
-    SystemCommand.quiet_system "/bin/launchctl", "load", Autoupdate::Core.plist
-
-    update_message = "Homebrew will now automatically update every #{Autoupdate::Interval.describe(interval)}"
-    if args.immediate?
-      puts "#{update_message}, now, and on system boot."
-    else
-      puts "#{update_message}."
-    end
-  end
-
-  def shell_export(name, value)
-    "export #{name}=#{Shellwords.escape(value)}"
   end
 end

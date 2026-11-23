@@ -1,124 +1,54 @@
 # frozen_string_literal: true
 
-require "plist"
+module Homebrew
+  module Cmd
+    class Autoupdate < AbstractCommand
+      class StatusSubcommand < AbstractSubcommand
+        subcommand_args do
+          usage_banner <<~EOS
+            `autoupdate status`:
+            Show whether autoupdate is running and describe its installed configuration.
+          EOS
+          named_args :none
+        end
 
-module Autoupdate
-  module_function
+        def run
+          running = ::Autoupdate::Launchd.loaded?
+          config_file = ::Autoupdate::Core.config_file
 
-  def autoupdate_running?
-    # Method from Homebrew.
-    # https://github.com/Homebrew/brew/blob/c9c7f4/Library/Homebrew/utils/popen.rb
-    Utils.popen_read("/bin/launchctl", "list").include?(Autoupdate::Core.name)
-  end
-
-  def autoupdate_not_configured?
-    !File.exist?(Autoupdate::Core.plist)
-  end
-
-  def date_of_last_modification
-    if File.exist?(Autoupdate::Core.location/"brew_autoupdate")
-      birth = File.birthtime(Autoupdate::Core.location/"brew_autoupdate")
-      formatted_string = birth.strftime("%F")
-    else
-      formatted_string = "Unable to determine date of command invocation. Please report this."
+          if config_file.exist?
+            core = ::Autoupdate::Core
+            puts "Autoupdate is installed and #{running ? "running" : "stopped"}."
+            puts
+            puts "Last started: #{config_file.mtime.strftime("%F")}"
+            begin
+              config = ::Autoupdate::Config.load(config_file)
+            rescue JSON::ParserError, ArgumentError => e
+              puts "Configuration: unable to read #{config_file} (#{e.message})"
+              return
+            end
+            puts config.summary(casks: core.casks_installed?)
+            puts "Logs: #{core.runs}"
+            signature = Utils.popen_read("/usr/bin/codesign", "-dvv", core.app, err: :out)
+            puts "App: #{core.app}, signed by #{signature[/^Authority=(.+)$/, 1] || "nobody (missing or unsigned)"}"
+            if core.app_management_file.exist?
+              puts "App Management at the last run: #{core.app_management_file.read.strip}"
+            end
+            if config.commit && config.commit != core.tap_commit
+              puts
+              puts ::Autoupdate::Script::RESTART_REMINDER
+            end
+          elsif running || File.exist?(::Autoupdate::Core.plist)
+            puts <<~EOS
+              Autoupdate cannot determine its status.
+              Please feel free to file an issue with further information here:
+              https://github.com/hybras/homebrew-autoupdate/issues
+            EOS
+          else
+            puts "Autoupdate is not configured. Use `brew autoupdate start` to begin."
+          end
+        end
+      end
     end
-    formatted_string
-  end
-
-  def autoupdate_inadvisably_old_message
-    creation = File.birthtime(Autoupdate::Core.location/"brew_autoupdate").to_date
-    days_old = (Date.today - creation).to_i
-
-    return if days_old < 90
-
-    <<~EOS
-      Autoupdate has been running for more than 90 days. Please consider
-      periodically deleting and re-starting this command to ensure the
-      latest features are enabled for you.
-    EOS
-  end
-
-  def status
-    running = autoupdate_running?
-    installed = File.exist?(Autoupdate::Core.location/"brew_autoupdate")
-
-    if running || installed
-      state = running ? "running" : "stopped"
-      puts "Autoupdate is installed and #{state}."
-      puts
-      puts "Initialised: #{date_of_last_modification}"
-      puts configuration_summary
-      puts
-      puts autoupdate_inadvisably_old_message if autoupdate_inadvisably_old_message
-    elsif autoupdate_not_configured?
-      puts "Autoupdate is not configured. Use `brew autoupdate start` to begin."
-    else
-      puts <<~EOS
-        Autoupdate cannot determine its status.
-        Please feel free to file an issue with further information here:
-        https://github.com/DomT4/homebrew-autoupdate/issues
-      EOS
-    end
-  end
-
-  def configuration_summary
-    plist = Plist.parse_xml(Autoupdate::Core.plist, marshal: false) || {}
-    interval = plist["StartInterval"]
-    calendar = plist["StartCalendarInterval"]
-    script = updater_script
-    status_script = script.gsub(" upgrade --no-ask", " upgrade")
-    details = []
-
-    if calendar
-      calendar_time = Autoupdate::Interval::CalendarTime.new(calendar["Hour"].to_i, calendar["Minute"].to_i)
-      details << "Schedule: every #{Autoupdate::Interval.describe(calendar_time)}"
-    elsif interval
-      details << "Schedule: every #{Autoupdate::Interval.describe(interval.to_i)} (#{interval} seconds)"
-    end
-    details << "Run at login: #{plist["RunAtLoad"] ? "yes" : "no"}"
-    details << "Upgrade: #{upgrade_summary(status_script)}"
-    details << "Cleanup: #{script.include?("#{Autoupdate::Core.brew} cleanup") ? "yes" : "no"}"
-    details << "AC power only: #{script.include?("/usr/bin/pmset -g ps") ? "yes" : "no"}"
-    details << "Greedy cask upgrades: yes" if status_script.include?("upgrade --cask -v --greedy")
-    details << "GUI sudo prompt: yes" if script.include?("brew_autoupdate_sudo_gui")
-    notification_mode = case script[%r{notifier/notify\.sh "\$status" "\$run_log" (\w+)}, 1]
-    when "always" then "yes"
-    when "error" then "failures only"
-    else
-      script.include?("/usr/bin/open -g") ? "yes (legacy)" : "no"
-    end
-    details << "Notifications: #{notification_mode}"
-    details << "Logs: #{plist["StandardOutPath"]}" if plist["StandardOutPath"]
-
-    details.join("\n")
-  rescue => e
-    "Configuration: unable to read (#{e.message})"
-  end
-
-  def updater_script
-    File.read(Autoupdate::Core.location/"brew_autoupdate")
-  rescue Errno::ENOENT
-    ""
-  end
-
-  def upgrade_summary(script)
-    return "top-level formulae only" if script.include?("brew_autoupdate_leaves")
-
-    selected_upgrade = script.lines.find do |line|
-      line.include?("#{Autoupdate::Core.brew} upgrade -v")
-    end
-    if selected_upgrade
-      packages = selected_upgrade.split(/\s+upgrade\s+-v(?:\s+--greedy)?\s+/, 2).last&.strip
-      packages = packages&.split(" && ", 2)&.first
-      return "selected packages (#{packages})" if packages.present?
-    end
-
-    formulae = script.include?("#{Autoupdate::Core.brew} upgrade --formula")
-    casks = script.include?("#{Autoupdate::Core.brew} upgrade --cask")
-    return "formulae and casks" if formulae && casks
-    return "formulae only" if formulae
-    return "casks only" if casks
-
-    "no"
   end
 end

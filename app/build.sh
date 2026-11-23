@@ -1,23 +1,28 @@
 #!/bin/bash
 
+# Usage: CODESIGN_IDENTITY=<identity> app/build.sh <output.app>
+# Builds, signs and verifies the app, then installs it at output.app.
+# `brew autoupdate start` passes its local certificate and the job's support
+# directory; CI and tests pass `-` (ad-hoc) and a temporary path.
+
 set -eu
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
-source_file="${script_dir}/notifier.swift"
-output_app="${script_dir}/brew-autoupdate.app"
+source_file="${script_dir}/BrewAutoupdate.swift"
+output_app="${1:?usage: CODESIGN_IDENTITY=<identity> app/build.sh <output.app>}"
 version_file="${script_dir}/../VERSION"
 identity=${CODESIGN_IDENTITY:-}
 version=$(<"${version_file}")
-build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate-notifier.XXXXXX")
+build_dir=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/brew-autoupdate.XXXXXX")
 build_app="${build_dir}/brew-autoupdate.app"
 backup_app="${build_dir}/previous.app"
-executable_name="brew-autoupdate-notifier"
+executable_name="brew-autoupdate"
 
 trap '/bin/rm -rf "$build_dir"' EXIT
 
 if [[ -z "${identity}" ]]
 then
-  echo "Set CODESIGN_IDENTITY to a local Apple code-signing identity." >&2
+  echo "Set CODESIGN_IDENTITY to a code-signing identity, or - for ad-hoc." >&2
   exit 1
 fi
 
@@ -28,13 +33,13 @@ then
 fi
 
 /bin/mkdir -p "${build_app}/Contents/MacOS" "${build_app}/Contents/Resources"
-/usr/bin/xcrun --sdk macosx swiftc -swift-version 5 \
+/usr/bin/xcrun --sdk macosx swiftc -swift-version 6 \
   -module-cache-path "${build_dir}/module-cache" \
-  -target arm64-apple-macos11.0 "${source_file}" \
+  -target arm64-apple-macos15.0 "${source_file}" \
   -o "${build_dir}/${executable_name}-arm64"
-/usr/bin/xcrun --sdk macosx swiftc -swift-version 5 \
+/usr/bin/xcrun --sdk macosx swiftc -swift-version 6 \
   -module-cache-path "${build_dir}/module-cache" \
-  -target x86_64-apple-macos11.0 "${source_file}" \
+  -target x86_64-apple-macos15.0 "${source_file}" \
   -o "${build_dir}/${executable_name}-x86_64"
 /usr/bin/lipo -create \
   "${build_dir}/${executable_name}-arm64" \
@@ -45,35 +50,44 @@ fi
 /usr/bin/plutil -insert CFBundleDevelopmentRegion -string "en" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleExecutable -string "${executable_name}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleIdentifier -string \
-  "com.github.domt4.homebrew-autoupdate.autoupdater" "${build_app}/Contents/Info.plist"
+  "com.github.hybras.homebrew-autoupdate.autoupdater" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleInfoDictionaryVersion -string "6.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleName -string "brew-autoupdate" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundlePackageType -string "APPL" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleShortVersionString -string "${version}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleVersion -string "${version}" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleIconFile -string "applet" "${build_app}/Contents/Info.plist"
-/usr/bin/plutil -insert LSMinimumSystemVersion -string "11.0" "${build_app}/Contents/Info.plist"
+/usr/bin/plutil -insert LSMinimumSystemVersion -string "15.0" "${build_app}/Contents/Info.plist"
 /usr/bin/plutil -insert LSUIElement -bool true "${build_app}/Contents/Info.plist"
+
+# Lets `brew autoupdate start` skip rebuilding an app built from the same sources.
+/bin/cat "${source_file}" "${script_dir}/build.sh" >"${build_dir}/sources"
+sources_sha256=$(/usr/bin/shasum -a 256 "${build_dir}/sources")
+sources_sha256=${sources_sha256%% *}
+/usr/bin/plutil -insert BrewAutoupdateSourcesSHA256 -string "${sources_sha256}" "${build_app}/Contents/Info.plist"
 
 /bin/cp "${script_dir}/applet.icns" "${build_app}/Contents/Resources/applet.icns"
 /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${build_app}"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${build_app}"
 
+/bin/mkdir -p "$(/usr/bin/dirname "${output_app}")"
 if [[ -d "${output_app}" ]]
 then
   /bin/mv "${output_app}" "${backup_app}"
 fi
 /bin/mv "${build_app}" "${output_app}"
 
-if ! /usr/bin/codesign --force --deep --options runtime --sign "${identity}" "${output_app}" ||
-   ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
+# The app was signed in the build directory. Verify it again in place, since
+# moving it across volumes could drop parts of the bundle, and keep the
+# previous app if it no longer verifies.
+if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "${output_app}"
 then
   /bin/rm -rf "${output_app}"
   if [[ -d "${backup_app}" ]]
   then
     /bin/mv "${backup_app}" "${output_app}"
   fi
-  echo "Signing failed; restored the previous notifier app." >&2
+  echo "The installed app failed verification; restored the previous app." >&2
   exit 1
 fi
 

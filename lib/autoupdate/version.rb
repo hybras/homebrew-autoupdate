@@ -1,44 +1,39 @@
 # frozen_string_literal: true
 
-module Autoupdate
-  VERSION_FILE = File.expand_path("../../VERSION", __dir__).freeze
-  VERSION = File.read(VERSION_FILE).strip.freeze
+module Homebrew
+  module Cmd
+    class Autoupdate < AbstractCommand
+      class VersionSubcommand < AbstractSubcommand
+        subcommand_args do
+          usage_banner <<~EOS
+            `autoupdate version`:
+            Show this tool's current version and a short changelog.
+          EOS
+          named_args :none
+        end
 
-  module_function
+        def run
+          tap_dir = ::Autoupdate::Core.tap_dir
+          puts <<~EOS
+            Version #{(tap_dir/"VERSION").read.strip}
 
-  def generate_version_notes
-    tapdir = Autoupdate::Core.tap_dir
-    log = nil
+          EOS
+          return if (tap_dir/".git/shallow").exist?
 
-    unless (tapdir/".git/shallow").exist?
-      last_version = Utils.popen_read("git", "-C", tapdir, "log", "--oneline",
-                                      "--grep=version: bump", "-n1", "--skip=1",
-                                      "--no-merges",
-                                      "--pretty=format:'%h'").delete("'").chomp
+          last_version, current_version = [1, 0].map do |skip|
+            Utils.popen_read("git", "-C", tap_dir, "log", "--grep=version: bump", "-n1", "--skip=#{skip}",
+                             "--no-merges", "--pretty=format:%h").chomp
+          end
+          log = Utils.popen_read("git", "-C", tap_dir, "log", "--oneline", "--no-merges",
+                                 "#{last_version}..#{current_version}").chomp
 
-      current_version = Utils.popen_read("git", "-C", tapdir, "log", "--oneline",
-                                         "--grep=version: bump", "-n1",
-                                         "--no-merges",
-                                         "--pretty=format:'%h'").delete("'").chomp
+          puts <<~EOS
+            Changes since last version:
 
-      log = Utils.popen_read("git", "-C", tapdir, "log", "--oneline", "--no-merges",
-                             "#{last_version}..#{current_version}").chomp
+            #{log}
+          EOS
+        end
+      end
     end
-
-    return if log.nil?
-
-    puts <<~EOS
-      Changes since last version:
-
-      #{log}
-    EOS
-  end
-
-  def version
-    puts <<~EOS
-      Version #{VERSION}
-
-    EOS
-    generate_version_notes
   end
 end

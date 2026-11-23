@@ -108,11 +108,18 @@ class CommandTest < Minitest::Test
     assert_includes output, "`--lines` must be a positive integer."
   end
 
-  def test_legacy_subcommand_switches_remain_supported
-    stdout, stderr, status = brew_autoupdate("--status")
+  def test_legacy_subcommand_switches_are_gone
+    output, status = brew_autoupdate_error("--status")
+
+    refute_predicate status, :success?
+    assert_includes output, "invalid option: --status"
+  end
+
+  def test_root_help_lists_restart
+    stdout, stderr, status = brew_autoupdate("--help")
 
     assert_predicate status, :success?, stderr
-    assert_match(/Autoupdate is (?:installed|not configured)/, stdout)
+    assert_includes stdout, "restart:"
   end
 
   def test_version_uses_the_shared_version_file
@@ -121,36 +128,6 @@ class CommandTest < Minitest::Test
     assert_predicate status, :success?, stderr
     assert_match(/\AVersion #{Regexp.escape(VERSION)}\n/o, stdout)
     refute_includes stdout, "Last Changed"
-  end
-
-  def test_generated_upgrade_commands_disable_confirmation
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-    upgrade_lines = source.lines.grep(/Autoupdate::Core\.brew\} upgrade /)
-
-    assert_equal 4, upgrade_lines.length
-    upgrade_lines.each do |line|
-      assert_includes line, "upgrade --no-ask"
-    end
-  end
-
-  def test_sudo_askpass_extracts_and_decodes_pinentry_data
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-    awk_program = source.match(%r{/usr/bin/awk '([^']+)'})&.captures&.first
-
-    refute_nil awk_program
-
-    pinentry_output = "D p%25ss\nD  leading space\nD \tleading tab\nD D\nOK\n"
-    stdout, stderr, status = Open3.capture3("/usr/bin/awk", awk_program, stdin_data: pinentry_output)
-
-    assert_predicate status, :success?, stderr
-    assert_equal "p%ss\n leading space\n\tleading tab\nD\n", stdout
-  end
-
-  def test_sudo_askpass_is_refreshed_when_its_contents_change
-    source = File.read(File.join(ROOT, "lib/autoupdate/start.rb"))
-
-    assert_includes source, "!sudo_gui_script.exist? || sudo_gui_script.read != sudo_gui_script_contents"
-    assert_includes source, "sudo_gui_script.atomic_write(sudo_gui_script_contents)"
   end
 
   private
