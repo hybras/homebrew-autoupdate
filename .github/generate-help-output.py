@@ -1,6 +1,7 @@
 import re
 import os
 import subprocess
+import sys
 
 def remove_ansi_escape_codes(text):
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -34,7 +35,7 @@ if tag_section_content:
         )
     except subprocess.CalledProcessError as e:
         print(f"Error running command: {e}")
-        exit(1)
+        sys.exit(1)
 
     help_command_output_current = tag_section_content.group(1).strip()
     help_command_output_new = remove_ansi_escape_codes(help_command_output_new.strip())
